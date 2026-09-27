@@ -355,7 +355,9 @@
     return (MULTI[key] = { e: (N, n) => Math.min(1, Math.exp(a + sN * Math.log(N / 8) + bn * Math.log2(Math.max(2, n) / 2))),
       own: own.length >= 2, maxN: Math.max(...use.map(p => p.n)), runs: use.map(p => p.run) });
   }
-  const inferRows = (f) => (MEAS.infer || []).filter(f);
+  // a row with any non-positive timing is a failed run, never a measurement
+  const okInf = r => r.out_tps > 0 && r.ttft_ms > 0 && r.tpot_ms > 0;
+  const inferRows = (f) => (MEAS.infer || []).filter(r => okInf(r) && f(r));
   let MP; const MAXPIN = () => MP !== undefined ? MP : (MP = Math.max(0, ...(MEAS.infer || []).map(r => r.inp)));
   // tensor parallel costs more than the roofline's all-reduce term: fitted on our TP 2/4/8 runs against the same model on the same
   // GPU after its 1-GPU correction, pooled across GPUs; ln(ratio) = b log2(tp) through tp = 1, per-token and first-token separately
@@ -402,12 +404,13 @@
     // first-token time under load relative to 1 user, as measured; log-linear in users between measured points
     const pts = [];
     for (const r of rows) { const b = one.find(x => x.model === r.model && x.inp === r.inp && x.out === r.out);
-      if (b && pred(r).cmax >= r.conc) pts.push([Math.log(r.conc), Math.log(r.ttft_ms / b.ttft_ms)]); }
+      if (b && pred(r).cmax >= r.conc) { const y = Math.log(r.ttft_ms / b.ttft_ms); if (isFinite(y)) pts.push([Math.log(r.conc), y]); } }
     pts.sort((a, b) => a[0] - b[0]);
     // isotonic fit (pool adjacent violators): points come from several models and lengths, and first-token time must not
     // fall as users are added; interpolate between the pooled levels, the last slope beyond the last measured user count
+    const byX = new Map(); for (const [x, y] of pts) { const v = byX.get(x) || [0, 0]; v[0] += y; v[1]++; byX.set(x, v); }   // one point per user count
     const blk = [];
-    for (const [x, y] of pts) { blk.push({ x0: x, x1: x, s: y, n: 1 });
+    for (const [x, [sy, ny]] of [...byX.entries()].sort((a, b) => a[0] - b[0])) { blk.push({ x0: x, x1: x, s: sy, n: ny });
       while (blk.length > 1 && blk[blk.length - 2].s / blk[blk.length - 2].n > blk[blk.length - 1].s / blk[blk.length - 1].n) {
         const b = blk.pop(), a = blk[blk.length - 1]; a.x1 = b.x1; a.s += b.s; a.n += b.n; } }
     const knots = blk.map(b => [(b.x0 + b.x1) / 2, Math.max(0, b.s / b.n)]);
@@ -418,7 +421,7 @@
         return Math.exp(yb + sl * (x - xb)); }
       let i = 1; while (knots[i][0] < x) i++; const [x0, y0] = knots[i - 1], [x1, y1] = knots[i];
       return Math.exp(y0 + (y1 - y0) * (x - x0) / (x1 - x0)); };
-    return (CAL[ck] = { dec: Math.min(1.5, Math.max(0.6, dec)), ttft1: Math.min(2, Math.max(0.5, ttft1)), load, runs: rows.map(r => r.run_id), n: rows.length });
+    return (CAL[ck] = { dec: Math.min(1.5, Math.max(0.6, dec)), ttft1: Math.min(2, Math.max(0.5, ttft1)), load, knots, rawDec: dec, rawTtft1: ttft1, runs: rows.map(r => r.run_id), n: rows.length });
   }
 
   const OSTATE = { adamw: 8, lion: 4, sgd: 4, adafactor: 0.1 };      // optimizer state bytes/trained param (fp32)
@@ -625,6 +628,6 @@
     }
     return out;
   }
-  const api = { GPUS, MODELS, ANCH, CAP, WQ, KVQ, OSTATE, attnType, vramOf, ft, inf, ftMem, kvBytes, level, etaN, MEAS, diagnostics };
+  const api = { GPUS, MODELS, ANCH, CAP, WQ, KVQ, OSTATE, attnType, vramOf, ft, inf, ftMem, kvBytes, level, etaN, MEAS, diagnostics, inferCal };
   if (isNode) module.exports = api; else Object.assign(root, api);
 })(typeof window !== "undefined" ? window : globalThis);

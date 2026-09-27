@@ -18,7 +18,7 @@
   const scaleLaw = (n, b) => { if (n <= 1) return 1; const base = b <= 8 ? 0.79 : b >= 70 ? 0.93 : 0.79 + (b - 8) / 62 * 0.14;
     return Math.max(0.3, 1 - (1 - base) * Math.log(n) / Math.log(4)); };
   const etaN = (n, b) => n > 1 ? MULTI_B * scaleLaw(n, b) : 1;
-  const CAP = { 80: { f: 1.119, cov: "147/193" }, 90: { f: 1.22, cov: "173/193" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
+  const CAP = { 80: { f: 1.226, cov: "235/288" }, 90: { f: 1.396, cov: "258/288" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
   const KV_UTIL = 0.90;
 
   // measured content-token throughput per GPU at seq 2048; [tok/s, gpus in run]
@@ -88,32 +88,42 @@
   // A deployment of N GPUs is R identical replicas (vLLM data parallel, requests split evenly), each tp x pp GPUs.
   // A model that fits on one GPU is served by replicas, not by splitting it; pipeline stages only appear across boxes.
   function inf(gk, m, o) {
-    if (o.ngpu === undefined) return inf1(gk, m, o);
+    if (o.ngpu === undefined && !o.fixLayout) return inf1(gk, m, o);
     const g = o.gpu || GPUS[gk], box = o.gpn || g.maxN || 8;
     const maxG = g.v === "Apple" ? box : Math.min(o.maxGpus || 64, 64);         // Macs are not clustered here
     if (m.ctx && o.pin + o.pout > m.ctx) return { gk, N: 0, fits: false, over: false, ctxOver: true, why: `prompt + output (${int0(o.pin + o.pout)} tokens) is longer than the model's ${int0(m.ctx)}-token context` };
-    const users = Math.max(1, o.C) * (o.batch || 1);
+    const users = Math.max(1, o.C), seqs = users * (o.batch || 1);
     const units = []; for (let tp = 1; tp <= box; tp *= 2) units.push({ tp, pp: 1 });
     for (let pp = 2; pp * box <= maxG; pp++) units.push({ tp: box, pp });
-    const at = N => {   // best layout on exactly N GPUs: serves every user if any does, then highest throughput
-      let best = null;
-      for (const u of units) { const R = N / (u.tp * u.pp); if (!Number.isInteger(R) || R < 1) continue;
-        const r = inf1(gk, m, { ...o, tp: u.tp, pp: u.pp, gpn: box, link: "auto", C: Math.ceil(Math.max(1, o.C) / R) });
-        if (!r.fits) continue; const x = replicate(r, R, o), ok = x.cmax >= users;
-        // units go smallest first, so a bigger split must be >10% faster to win: replicas are what people deploy
-        if (!best || (ok && !best.ok) || (ok === best.ok && x.agg > best.x.agg * 1.1)) best = { x, ok }; }
-      return best;
-    };
-    if (o.ngpu > 0) { const b = at(Math.min(o.ngpu, maxG)); return b ? b.x : inf1(gk, m, { ...o, tp: Math.min(o.ngpu, box), pp: Math.max(1, Math.ceil(o.ngpu / box)), gpn: box, maxGpus: maxG }); }
-    const opts = [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64].filter(N => N <= maxG);
-    let first = null;
-    for (const N of opts) { const b = at(N); if (!b) continue; if (b.ok) return b.x; first = first || b.x; }
-    return first || inf1(gk, m, { ...o, tp: Math.min(maxG, box), pp: Math.max(1, maxG / box), gpn: box, maxGpus: maxG });
+    const one = (u, C) => inf1(gk, m, { ...o, tp: u.tp, pp: u.pp, gpn: box, link: "auto", C });
+    if (o.fixLayout) { const x = spread(one, o.fixLayout, o.fixLayout.R, users, o); return x || one(o.fixLayout, users); }
+    const cands = [];
+    for (const u of units) {
+      const n1 = u.tp * u.pp; if (n1 > maxG) continue;
+      const p = one(u, 1); if (!p.fits) continue;
+      let R;
+      if (o.ngpu > 0) { const N = Math.min(o.ngpu, maxG); if (N % n1) continue; R = N / n1; }
+      else R = Math.min(Math.ceil(seqs / Math.max(1, p.cmax)), Math.floor(maxG / n1));
+      if (R < 1) continue; const x = spread(one, u, R, users, o); if (x) cands.push(x);
+    }
+    if (!cands.length) return inf1(gk, m, { ...o, tp: Math.min(o.ngpu || 1, box), pp: Math.max(1, Math.ceil((o.ngpu || 1) / box)), gpn: box, maxGpus: maxG });
+    const ok = cands.filter(x => x.cmax >= seqs);
+    // serving every user: cheapest per token (GPU-seconds per token), smaller copies win a near-tie; else the most throughput
+    const cost = x => x.N / x.agg, pool = ok.length ? ok : cands;
+    let best = null;
+    for (const x of pool) if (!best || (ok.length ? cost(x) < cost(best) / 1.1 : x.agg > best.agg * 1.1)) best = x;
+    return best;
   }
-  function replicate(r, R, o) {
-    if (R === 1) return { ...r, R: 1, unitN: r.N };
-    return { ...r, R, unitN: r.N, N: r.N * R, B: r.B * R, users: Math.min(Math.max(1, o.C), r.users * R), cmax: r.cmax * R,
-      queued: r.B * R < Math.max(1, o.C) * (o.batch || 1), agg: r.agg * R, rph: r.rph * R, kvUsed: r.kvUsed * R, knee: r.knee && r.knee * R };
+  // R identical copies share `users` as evenly as possible; copies beyond the number of users sit idle but are still paid for
+  function spread(one, u, R, users, o) {
+    const active = Math.min(R, users), lo = Math.floor(users / active), nHi = users - lo * active, hi = nHi ? lo + 1 : lo;
+    const rh = one(u, hi); if (!rh.fits) return null;
+    const rl = nHi && nHi < active && lo >= 1 ? one(u, lo) : null, cHi = nHi || active, cLo = active - cHi;
+    const part = (a, b) => cHi * a + (rl ? cLo * b : 0);
+    const agg = part(rh.agg, rl && rl.agg), unitN = rh.N;
+    return { ...rh, R, unitN, N: unitN * R, B: part(rh.B, rl && rl.B), users: Math.min(users, rh.cmax * R), cmax: rh.cmax * R, queued: rh.queued || !!(rl && rl.queued),
+      agg, rph: agg * 3600 / o.pout, kvUsed: part(rh.kvUsed, rl && rl.kvUsed), knee: rh.knee && rh.knee * R, idle: R - active,
+      perM: rh.perM == null ? null : rh.perM * (rh.agg * R) / agg };   // idle copies cost money and produce nothing
   }
   function inf1(gk, m, o) {
     const g = o.gpu || GPUS[gk], wq = o.wq || "bf16", wb = WQ[wq] || 2, kvq = KVQ[o.kvq] || 2;
@@ -147,26 +157,38 @@
     const preComm = tp > 1 ? 2 * Lyr * (o.pin * m.h * 2) / LINKBW[link] + 2 * Lyr * AR[link] : 0;
     let ttft = TTFT0 + (o.pin * 2 * bn(m.a) + attnFlops(m, o.pin)) / (peak * PRE_MFU) + preComm;
     // our vLLM measurements: exact match overrides; otherwise a per-GPU correction fitted on our runs
-    const runs = []; let calFrom = null, tpCorr = null;
+    const runs = []; let calFrom = null, tpCorr = null, amd = null, anchored = null;
     if (!o.raw && !o.gpu) {
       const key = keyOf(m), q = wq === "fp8" ? "fp8" : wq === "bf16" || wq === "fp16" ? "none" : null;
-      const exs = q && (o.kvq || "fp16") === "fp16" && offGB === 0 ? inferRows(r => r.gpu === gk && r.model === key && r.quant === q && r.tp === tp && pp === 1 && r.inp === o.pin && r.out === o.pout && r.conc === users * (o.batch || 1)) : [];
+      const exs = q && !o._noExact && (o.kvq || "fp16") === "fp16" && offGB === 0 ? inferRows(r => r.gpu === gk && r.model === key && r.quant === q && r.tp === tp && pp === 1 && r.inp === o.pin && r.out === o.pout && r.conc === users * (o.batch || 1)) : [];
       if (exs.length) {   // repeated runs averaged
-        st.t = gmean(exs.map(r => r.tpot_ms)) / 1000; ttft = gmean(exs.map(r => r.ttft_ms)) / 1000; st.aggM = gmean(exs.map(r => r.out_tps)); runs.push(...exs.map(r => r.run_id)); }
+        st.t = gmean(exs.map(r => r.tpot_ms)) / 1000; ttft = gmean(exs.map(r => r.ttft_ms)) / 1000; st.aggM = gmean(exs.map(r => r.out_tps)); runs.push(...exs.map(r => r.run_id)); }   // measured values stand, including a 1-user first token above the 2-user one (medians over 32+ requests, not warm-up)
       else {
         // the vLLM correction (scheduler, kernels, sampling) measured at BF16 also applies to weight-only INT8/INT4 and to FP8
         // where FP8 was not run; a GPU with no vLLM runs borrows the nearest measured GPU's correction
         const own = inferCal(gk, q || "none") || (q === "fp8" ? inferCal(gk, "none") : null);
         const src = own ? gk : nearestInferGpu(gk), cal = own || (src ? inferCal(src, "none") : null);
-        if (cal) { st.t *= cal.dec; ttft *= cal.ttft1 * cal.load(users * (o.batch || 1)); runs.push(...cal.runs); calFrom = src; }
+        if (cal) { const tOff = Math.min(off, st.t); st.t = (st.t - tOff) * cal.dec + tOff; ttft *= cal.ttft1 * cal.load(users * (o.batch || 1)); runs.push(...cal.runs); calFrom = src; }
         if (tp > 1) { const c = tpCal(tp); if (c) { st.t *= c.dec; ttft *= c.ttft; runs.push(...c.runs); tpCorr = c; } }
+        if (g.v === "AMD" && !o._noAmd && !inferRows(r => r.gpu === gk).length) { const F = amdFactors(), f = F[gk] || F.__mean;
+          if (f) { st.t /= f; ttft /= f; amd = { f, own: gk in F, pair: AMD_PAIRS[gk] || null }; } }
       }
+    }
+    if (!o.raw && !o.gpu && !st.aggM && !o._noAnchor && tp && pp === 1) {
+      const key = keyOf(m), aq = wq === "fp8" ? "fp8" : "none";
+      const anc = inferRows(r => r.gpu === gk && r.model === key && r.quant === aq && r.tp === tp && r.inp === o.pin && r.out === o.pout && r.conc === users * (o.batch || 1));
+      if (anc.length && ((o.kvq || "fp16") !== "fp16" || offGB > 0 || (wq !== "bf16" && wq !== "fp16" && wq !== "fp8"))) {
+        const base = { ...o, kvq: "fp16", wq: aq === "fp8" ? "fp8" : "bf16", offload: "", _noAnchor: 1, _noExact: 1 };
+        const mdl = inf1(gk, m, base);
+        if (mdl.fits) { const kt = gmean(anc.map(r => r.tpot_ms)) / mdl.tpot, kf = gmean(anc.map(r => r.ttft_ms)) / (mdl.ttft * 1000);
+          st.t *= kt; ttft *= kf; anchored = { runs: anc.map(r => r.run_id) }; runs.push(...anchored.runs); } }
     }
     let bf = null;
     if (wq === "fp8" && !o.raw && !o.gpu && !st.aggM && (runs.length || inferCal(gk, "none"))) {   // FP8 weights read half the bytes of BF16: never slower (only where our vLLM corrections apply)
       const b = bf = inf1(gk, m, { ...o, wq: "bf16" });
-      if (b.fits && b.tpot / 1000 < st.t) st.t = b.tpot / 1000;
-      if (b.fits && b.ttft < ttft) ttft = b.ttft;
+      // only at the same batch: BF16 often holds fewer sequences, and a small batch's step time says nothing about a big one
+      if (b.fits && b.B >= B && b.tpot / 1000 < st.t) st.t = b.tpot / 1000;
+      if (b.fits && b.B >= B && b.ttft < ttft) ttft = b.ttft;
     }
     // closed loop, as vllm bench serve runs it: each of the B slots waits for its first token, then streams pout tokens
     const agg = st.aggM || B * o.pout / (ttft + o.pout * st.t);
@@ -183,7 +205,7 @@
       wh1m: g.tdp * N / (agg * 3600) * 1e6,
       mem: { weights: wGB - offGB, kv: seqGB * B, act, ovh, off: offGB, total: wGB - offGB + seqGB * B + act + ovh, cap: vramOf(g) * N },
       runs, measured: runs.length > 0, exact: !!st.aggM, calFrom, calN: calFrom ? (inferCal(calFrom, "none") || {}).n : 0,
-      tpCorr, pinBeyond: !st.aggM && o.pin > MAXPIN() ? MAXPIN() : 0     // first-token load curve extrapolated past our longest measured prompt
+      tpCorr, amd, anchored, pinBeyond: !st.aggM && o.pin > MAXPIN() ? MAXPIN() : 0     // first-token load curve extrapolated past our longest measured prompt
     };
   }
   const hasNV = (g, n) => !!g.nvlink || (!!g.nvpair && n <= 2);
@@ -234,6 +256,9 @@
     // exact setup first; else interpolate over tokens per step among runs at the same sequence length when they
     // bracket T; else among all runs (one point per step size, averaging different sequence lengths)
     if (seq) { const ex = all.find(p => p.seq === seq && Math.abs(p.T / T - 1) < 0.02); if (ex) return { tok: ex.tok, runs: [ex.run], exact: true, T: ex.T, seq: ex.seq }; }
+    const maxSeq = Math.max(...all.map(p => p.seq || 0));
+    if (seq && seq > maxSeq * 1.02) { const top = all.filter(p => p.seq === maxSeq).sort((a, b) => a.T - b.T), p = top[top.length - 1];
+      return { tok: p.tok, runs: [p.run], exact: false, clamped: "hi", T: p.T, seq: p.seq }; }
     const same = seq ? all.filter(p => p.seq === seq) : [];
     let pts = same.length >= 2 && T >= same[0].T && T <= same[same.length - 1].T ? same : null;
     if (!pts) { const byT = {}; for (const p of all) (byT[p.T] = byT[p.T] || []).push(p);
@@ -292,8 +317,9 @@
   }
   function stepFactor(T, N, gk) {
     const s = stepLaw(gk); if (!s) return null;
-    if (T < 2048) return Math.pow(T / 2048, Math.min(1, s.lo.e8 * Math.pow(8 / N, s.lo.k)));
-    return s.hi ? Math.pow(T / 2048, Math.min(0.15, s.hi.e8 * Math.pow(8 / N, s.hi.k))) : 1;
+    // exponents kept >= 0: a noisy GPU (L40S under power limits) cannot make bigger steps slower
+    if (T < 2048) return Math.pow(T / 2048, Math.max(0, Math.min(1, s.lo.e8 * Math.pow(8 / N, s.lo.k))));
+    return s.hi ? Math.pow(T / 2048, Math.max(0, Math.min(0.15, s.hi.e8 * Math.pow(8 / N, s.hi.k)))) : 1;
   }
   // LoRA rank: f = (r/16)^e from runs at other ranks
   function rankFactor(gk, r) {
@@ -377,11 +403,28 @@
     if (!TPC) return null; const x = Math.log2(tp);
     return { dec: Math.exp(Math.max(0, TPC.bd) * x), ttft: Math.exp(Math.max(0, TPC.bt) * x), runs: TPC.runs, n: TPC.n, bd: TPC.bd, bt: TPC.bt };
   }
+  // AMD serving efficiency relative to our NVIDIA-calibrated model, from MLPerf Inference v5.0 closed, Llama 2 70B, FP8, Offline,
+  // best per-GPU result: MI300X 3,224 vs H100-SXM 3,913 tok/s; MI325X 4,241 vs H200-SXM 4,432 (both vLLM-ROCm vs TensorRT-LLM).
+  // factor = measured AMD/NVIDIA ratio / this engine's ratio for the same workload; the same prompt-length sweep gives the same factor.
+  // MLPerf Training (v4.1/v5.0 closed), Llama 2 70B LoRA, 8 GPUs, one node: best time-to-train in minutes, from the raw result logs
+  const MLPERF_FT = { h100: 27.03, h200: 22.31, mi300x: 28.02, mi325x: 20.96, b200: 10.66 }, AMD_FT_PAIRS = { mi300x: "h100", mi325x: "h200" };
+  const MLPERF = { h100: 3913, h200: 4432, mi300x: 3224, mi325x: 4241 }, AMD_PAIRS = { mi300x: "h100", mi325x: "h200" };
+  let AMDF;
+  function amdFactors() {
+    if (AMDF) return AMDF; AMDF = {};
+    const m = MODELS["llama-2-70b"]; if (!m) return AMDF;
+    const cap = g => { let b = 0; for (const tp of [1, 2, 4, 8]) { if (tp > (GPUS[g].maxN || 8)) continue;
+      const o = { pin: 600, pout: 294, batch: 1, wq: "fp8", kvq: "fp8", tp, pp: 1, gpn: 8, link: "auto", _noAmd: 1 };
+      const r0 = inf1(g, m, { ...o, C: 1 }); if (!r0.fits) continue; const r = inf1(g, m, { ...o, C: Math.min(r0.cmax, 4096) }); b = Math.max(b, r.B / r.t / tp); } return b; };
+    for (const [a, n] of Object.entries(AMD_PAIRS)) if (GPUS[a] && GPUS[n]) AMDF[a] = (MLPERF[a] / MLPERF[n]) / (cap(a) / cap(n));
+    const v = Object.values(AMDF); AMDF.__mean = v.length ? gmean(v) : null;
+    return AMDF;
+  }
   const specScore = g => W * Math.log(g.tf) + (1 - W) * Math.log(g.bw);
   // the measured GPU closest in datasheet speed (same vendor first), for GPUs with no runs of their own
   function nearest(gk, has, anyVendor) {
     const g = GPUS[gk]; let best = null;
-    for (const k of Object.keys(GPUS)) { if (k === gk || !has(k)) continue; const d = Math.abs(specScore(GPUS[k]) - specScore(g)) + (GPUS[k].v === g.v ? 0 : 10);
+    for (const k of Object.keys(GPUS)) { if (k === gk || !has(k)) continue; const d = Math.abs(specScore(GPUS[k]) - specScore(g)) + (GPUS[k].v === g.v ? 0 : 10) + (GPUS[k].tier === g.tier ? 0 : 1);
       if (!best || d < best.d) best = { k, d }; }
     return best && (anyVendor || best.d < 10) ? best.k : null;
   }
@@ -491,6 +534,11 @@
   // Volta and Turing: no BF16 (training runs in FP16) and no Flash Attention 2
   const NO_FA2 = new Set(["v100", "v100-32", "t4"]);
   function ft(gk, m, key, o) {
+    // ZeRO "auto": the stage that makes this job cheapest (DDP when the weights fit, sharding only when memory needs it)
+    if (o.zero === "auto") { let best = null;
+      for (const z of [0, 1, 2, 3]) { const r = ft(gk, m, key, { ...o, zero: z }); if (!r.fits || !r.quoted) continue;
+        const k = r.cost != null ? r.cost : r.gpuH; if (!best || k < best.k * 0.999) best = { r, k }; }
+      return best ? { ...best.r, zeroAuto: true } : ft(gk, m, key, { ...o, zero: 3 }); }
     if (NO_FA2.has(gk) && o.flash !== false) o = { ...o, flash: false, _noFa2: 1 };
     const g = GPUS[gk], avg = o.seq || 1024, tt = o.rows * avg * o.epochs;
     const mem = ftMem(m, o);
@@ -505,6 +553,16 @@
     const r = { gk, n, tt, mem, zero: z, perGpuGB: perGpu(Math.min(n, g.maxN)), perGpuAt: perGpu };
     if (m.ctx && mem.seqEff > m.ctx * 1.001) return { ...r, fits: false, ctxOver: true, why: `sequences of ${int0(mem.seqEff)} tokens exceed the model's ${int0(m.ctx)}-token context` };
     if (n > g.maxN) return { ...r, fits: false, why: "more than " + g.maxN + " GPUs" };
+    // AMD fine-tuning: no runs of ours; our runs on the NVIDIA GPU MLPerf compares it with, x the measured MLPerf speed ratio
+    if (g.v === "AMD" && AMD_FT_PAIRS[gk] && levelMeasured(gk) == null && !o._sib) {
+      const ref = AMD_FT_PAIRS[gk], rr = ft(ref, m, key, { ...o, ngpu: n, zero: z, _sib: 1 }), ratio = MLPERF_FT[ref] / MLPERF_FT[gk];
+      if (rr.fits && rr.quoted) { const eff = rr.eff * ratio, hours = tt / (eff * n) / 3600, gpuH = hours * n, cost = g.rate == null ? null : gpuH * g.rate * OVERHEAD;
+        const adj = [`from our ${GPUS[ref].name} runs x${ratio.toFixed(2)}: MLPerf Training Llama 2 70B LoRA on 8 GPUs, ${GPUS[gk].sn} ${MLPERF_FT[gk]} min vs ${GPUS[ref].sn} ${MLPERF_FT[ref]} min`, ...rr.adj.filter(a => typeof a === "string")];
+        const gbatch = (o.batch || 1) * (o.accum || 1) * n, samples = o.rows * o.epochs, sps = eff * n / avg;
+        return { ...r, fits: true, quoted: true, tok: rr.tok * ratio, eff, tag: "X", adj, exactRun: false, jobTok: eff * n, hours, gpuH, cost, amdFt: { ref, ratio },
+          cap: cost == null ? null : cost * CAP[o.cov].f, perM: cost == null ? null : cost / (tt / 1e6), mfu: 6 * bn(m.a) * eff * (o.method === "dpo" ? 2 : 1) / (g.tf * 1e12) * 100,
+          kwh: g.tdp * n * hours / 1000, powerMeasured: false, runs: rr.runs, gbatch, steps: Math.ceil(samples / gbatch), sps, stepsPerSec: sps / gbatch }; }
+    }
     if (g.ftq === "no" && levelMeasured(gk) == null) return { ...r, fits: true, quoted: false, why: "needs a calibration run" };
     let [base, tag, mlaw] = ftTok(gk, m, key, n, o.zero == null ? 3 : o.zero);
     const adj = [];
@@ -522,7 +580,13 @@
     // a method with no runs of its own on this model uses this model's LoRA runs x the measured method ratio
     for (const mth of meth0 === "lora" ? ["lora"] : [meth0, "lora"]) {
       const viaLora = mth !== meth0;
-      if ((curve = measuredCurve(gk, key, mth, n, z))) { if (viaLora) via = { kind: "lora", viaLora }; break; }
+      if ((curve = measuredCurve(gk, key, mth, n, z))) {
+        const c1 = n > 1 ? measuredCurve(gk, key, mth, 1, null) : null, lo = curve[0].T, hi = curve[curve.length - 1].T;
+        if (c1 && (Tstep < lo * 0.98 || Tstep > hi * 1.02) && Tstep >= c1[0].T * 0.98 && Tstep <= c1[c1.length - 1].T * 1.02) {
+          const Ts = Tstep < lo ? lo : hi, e = Math.min(1, curveAt(curve, Ts, null).tok / curveAt(c1, Ts, null).tok);
+          curve = c1; scale = e; via = { kind: "1gpu-eff", e, viaLora };
+        } else if (viaLora) via = { kind: "lora", viaLora };
+        break; }
       if (n > 1 && (curve = measuredCurve(gk, key, mth, 1, null))) { scale = mlaw ? mlaw.e(m.f, n) : etaN(n, m.f); via = { kind: "1gpu", viaLora }; break; }
       const t = transferFrom(gk, key, mth);
       if (t) { curve = t.curve; scale = t.ratio * (n > 1 ? (mlaw ? mlaw.e(m.f, n) : etaN(n, m.f)) : 1); via = { kind: "transfer", viaLora, ...t }; break; }
@@ -572,6 +636,7 @@
     if (dr) { const ids = String(dr.run_id).split(/[,+]\s*/).filter(Boolean);   // ids stay in the tooltip, not the text
       if (dr.via && dr.via.kind === "transfer") adj.push(`from our ${GPUS[dr.via.ref].name} runs of this model x${dr.via.ratio.toFixed(2)} (speed ratio on ${dr.via.common} model${dr.via.common > 1 ? "s" : ""} both GPUs ran)`);
       if (dr.via && dr.via.kind === "1gpu") adj.push(`from our 1-GPU runs of this model (no ${n}-GPU run)`);
+      if (dr.via && dr.via.kind === "1gpu-eff") adj.push(`from our 1-GPU runs at this step size x${dr.via.e.toFixed(2)} (our ${n}-GPU runs vs 1 GPU)`);
       if (dr.via && dr.via.viaLora) adj.push("from our LoRA runs of this model");
       adj.push({ text: dr.exact ? (ids.length > 1 ? `our measured runs (${ids.length} repeats)` : "our measured run") :
         dr.clamped ? `scaled from our run${ids.length > 1 ? "s" : ""} at ${int0(dr.T)} tokens per step (outside the measured range)` :
@@ -600,12 +665,14 @@
         adj.length = 0; adj.push(`scaled from our ${GPUS[ref].name} runs by datasheet speed x${ratio.toFixed(2)} (no runs on this GPU)`, ...rr.adj.filter(a => typeof a === "string"));
       }
     }
+    if (n > 1 && !o._cap1) { const r1 = ft(gk, m, key, { ...o, ngpu: 1, zero: z, _cap1: 1 });
+      if (r1.fits && r1.quoted && eff > r1.eff) { eff = r1.eff; adj.push("capped at the 1-GPU speed per GPU"); } }
     const hours = tt / (eff * n) / 3600, gpuH = hours * n;
     const cost = g.rate == null ? null : gpuH * g.rate * OVERHEAD;
     const gbatch = (o.batch || 1) * (o.accum || 1) * n, samples = o.rows * o.epochs;
     const sps = eff * n / avg;
     return {
-      ...r, fits: true, quoted: true, tok: base, eff, tag, adj, jobTok: eff * n, hours, gpuH, cost,
+      ...r, fits: true, quoted: true, tok: base, eff, tag, adj, exactRun: !!(dr && dr.exact), jobTok: eff * n, hours, gpuH, cost,
       cap: cost == null ? null : cost * CAP[o.cov].f, perM: cost == null ? null : cost / (tt / 1e6),
       mfu: 6 * bn(m.a) * eff * (o.method === "dpo" ? 2 : 1) / (g.tf * 1e12) * 100, kwh: g.tdp * (powerFrac(gk) || 1) * n * hours / 1000, powerMeasured: powerFrac(gk) != null, runs,
       gbatch, steps: Math.ceil(samples / gbatch), sps, stepsPerSec: sps / gbatch
@@ -628,6 +695,6 @@
     }
     return out;
   }
-  const api = { GPUS, MODELS, ANCH, CAP, WQ, KVQ, OSTATE, attnType, vramOf, ft, inf, ftMem, kvBytes, level, etaN, MEAS, diagnostics, inferCal };
+  const api = { GPUS, MODELS, ANCH, CAP, WQ, KVQ, OSTATE, attnType, vramOf, ft, inf, ftMem, kvBytes, level, etaN, MEAS, diagnostics, inferCal, amdFactors, MLPERF, MLPERF_FT, NO_FA2 };
   if (isNode) module.exports = api; else Object.assign(root, api);
 })(typeof window !== "undefined" ? window : globalThis);

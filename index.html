@@ -365,10 +365,10 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
         <div class="f"><label>Method</label><div class="segc" data-for="method" data-opts="lora:LoRA|qlora:QLoRA|full:Full fine-tune|dpo:DPO"></div></div>
         <div class="f"><label>Optimizer</label><div class="segc" data-for="optim" data-opts="adamw:AdamW|lion:Lion|adafactor:Adafactor|sgd:SGD"></div></div>
         <div class="f" id="rankf"><label>LoRA rank</label><div class="segc" data-for="rank" data-opts="8:8|16:16|32:32|64:64|128:128"></div></div>
-        <div class="f"><label>ZeRO / FSDP stage</label><div class="segc" data-for="zero" data-opts="0:0 DDP|1:1 Optim|2:2 Grads|3:3 FSDP"></div><div class="fnote" id="zeronote"></div></div>
+        <div class="f"><label>ZeRO / FSDP stage</label><div class="segc" data-for="zero" data-opts="auto:Auto|0:0 DDP|1:1 Optim|2:2 Grads|3:3 FSDP"></div><div class="fnote" id="zeronote"></div></div>
       </div>
       <div class="slg">
-        <div class="sl" data-for="fbatch" data-ticks="1,2,4,8,16,32,64" data-label="Batch size" data-unit="per GPU" data-note="Bigger steps keep the GPU busier: faster, more memory (measured)."></div>
+        <div class="sl" data-for="fbatch" data-ticks="1,2,4,8,16,32,64" data-label="Batch size" data-unit="per GPU" data-note="Bigger steps keep the GPU busier and use more memory; the speed effect is measured per GPU (power-limited cards like L40S can slow down)."></div>
         <div class="sl" data-for="accum" data-ticks="1,2,4,8,16,32,64" data-label="Gradient accumulation" data-unit="steps"></div>
         <div class="sl" data-for="maxseq" data-ticks="512,1024,2048,4096,8192,16384,32768" data-label="Max sequence length" data-unit="tokens"></div>
         <div class="sl" data-for="ngpu" data-ticks="Auto,1,2,4,8" data-label="GPUs" data-unit="" data-note="Auto picks the fewest that fit."></div>
@@ -381,7 +381,7 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
         <input id="fbatch" type="number" min="1" value="1">
         <select id="maxseq"><option>512</option><option>1024</option><option selected>2048</option><option>4096</option><option>8192</option><option>16384</option><option>32768</option></select>
         <select id="accum"><option>1</option><option>2</option><option>4</option><option selected>8</option><option>16</option><option>32</option><option>64</option></select>
-        <select id="zero"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option></select>
+        <select id="zero"><option value="auto" selected>auto</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
         <select id="ngpu"><option value="0" selected>Auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select>
       </div>
     </div>
@@ -483,7 +483,7 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
 <script>
 const $=id=>document.getElementById(id);
 const MEASURED=window.MEASURED||{train:[],infer:[],pods:[]};
-const S={zero:3,ngpu:0,igpu:0,memv:"gpu",basePreset:"measured",fgoal:"cost",mode:"ft",model:"qwen3-14b",gpu:"h100",gf:"dc",method:"lora",optim:"adamw",rank:16,fbatch:1,maxseq:2048,accum:8,preset:"measured",
+const S={zero:"auto",ngpu:0,igpu:0,memv:"gpu",basePreset:"measured",fgoal:"cost",mode:"ft",model:"qwen3-14b",gpu:"h100",gf:"dc",method:"lora",optim:"adamw",rank:16,fbatch:1,maxseq:2048,accum:8,preset:"measured",
  flash:true,ckpt:true,opt8:false,fused:false,packing:false,dynpad:true,pure16:false,
  wq:"bf16",kvq:"fp16",ibatch:1,offload:"",cov:90,st:"perf",xt:null,mv:"cost",api:{ft:3,in:0.15,out:0.60},gco2:475};
 GPUS.custom={name:"Custom GPU",sn:"Custom",v:"Custom",tier:"custom",tf:100,bw:1,vram:24,tdp:300,rate:null,rsrc:"your specs",fleet:false,ftq:"x",mkt:{},maxN:8};
@@ -500,9 +500,9 @@ const PRESETS={measured:{flash:1,ckpt:1,opt8:0,fused:0,packing:0,dynpad:1,pure16
 const LIM={rows:[1,1e9],seq:[1,131072],epochs:[1,100],pin:[1,1048576],pout:[1,131072],conc:[1,4096],ibatch:[1,64],fbatch:[1,512],ctot:[0.1,10000],cact:[0.1,10000],ckv:[1,100000],cg_vram:[1,4096],cg_bw:[0.05,100],cg_tf:[1,100000],cg_rate:[0,1000]};
 const clampV=(id,v)=>{const l=LIM[id];if(!l||v===""||!isFinite(+v))return v;return String(Math.min(l[1],Math.max(l[0],+v)));};
 const num=id=>Math.max(1,+clampV(id,$(id).value)||1);
-const money=n=>n==null||!isFinite(n)?"n/a":"$"+(n<0.1?n.toFixed(3):n<10?n.toFixed(2):n<100?n.toFixed(1):Math.round(n).toLocaleString());
+const money=n=>n==null||!isFinite(n)?"n/a":n>0&&n<0.001?"<$0.001":"$"+(n<0.1?n.toFixed(3):n<10?n.toFixed(2):n<100?n.toFixed(1):Math.round(n).toLocaleString());
 const int=n=>Math.round(n).toLocaleString();
-const dur=h=>h<1?Math.max(1,Math.round(h*60))+" min":h<48?h.toFixed(1)+" h":(h/24).toFixed(1)+" days";
+const dur=h=>h*60<1?"<1 min":h<1?Math.round(h*60)+" min":h<48?h.toFixed(1)+" h":(h/24).toFixed(1)+" days";
 const ms=s=>s<1?Math.round(s*1000)+" ms":s<60?s.toFixed(s<10?2:1)+" s":s<3600?(s/60).toFixed(1)+" min":(s/3600).toFixed(1)+" h";
 const tpotF=t=>t<100?t.toFixed(1)+" ms":ms(t/1000);
 const gb=x=>x>=1000?(x/1000).toFixed(2)+" T":x<10?x.toFixed(1):int(x);
@@ -623,11 +623,14 @@ function renderMain(){
   $("h1").textContent=isFt?"Fine-tuning: cost and time":"Inference: speed and cost";
   const im=!isFt&&INF(S.gpu,S.model),fm=isFt&&FT(S.gpu,S.model),apple=GPUS[S.gpu].v==="Apple";
   const pv=isFt?(!fm||!fm.fits?["est","Does not fit",""]:!fm.quoted?["est","Not quoted","No measured fine-tuning speed on this GPU yet."]:
+      fm.tag==="M"&&!fm.exactRun?["cal","Interpolated between our runs","From our runs of this model on this GPU at nearby step sizes, with a tested price cap."]:
+      fm.amdFt?["est",`AMD: x${fm.amdFt.ratio.toFixed(2)} from MLPerf`,`No fine-tuning runs of ours on AMD. From our ${GPUS[fm.amdFt.ref].name} runs, scaled by the MLPerf Training ratio for Llama 2 70B LoRA on 8 GPUs (${GPUS[S.gpu].sn} ${MLPERF_FT[S.gpu]} min vs ${GPUS[fm.amdFt.ref].sn} ${MLPERF_FT[fm.amdFt.ref]} min).`]:
       fm.tag==="M"?["cal","Measured on our runs","From our fine-tuning runs of this exact model on this GPU, with a tested price cap."]:
       fm.tag==="P"?["cal","Scaled from our runs","From our runs, adjusted for the settings that differ (listed under Performance), with a tested price cap."]:
       ["est","Estimate from specs","No runs on this GPU: scaled from the closest GPU we measured by datasheet speed, with a tested price cap."])
     :!im||!im.fits?["est","Does not fit",""]:
       im.exact?["cal",im.R>1?`Measured per replica, x${im.R}`:"Measured on our vLLM runs",im.R>1?`Our vLLM run of this exact setup, run as ${im.R} identical replicas.`:"Our vLLM run of this exact setup on this GPU."]:
+      im.amd?["est",`AMD: x${im.amd.f.toFixed(2)} from MLPerf`,`No vLLM runs of ours on AMD. Estimated from bandwidth and compute with our ${GPUS[im.calFrom].name} correction, then scaled by x${im.amd.f.toFixed(2)} for AMD: in MLPerf v5.0 (Llama 2 70B, FP8) ${im.amd.own?`${GPUS[S.gpu].sn} measured ${(MLPERF[S.gpu]/MLPERF[im.amd.pair]).toFixed(2)}x an ${GPUS[im.amd.pair].sn}`:"MI300X and MI325X measured 0.51 to 0.54 of what their specs predict against H100 and H200"}${im.amd.own?"":`; ${GPUS[S.gpu].sn} itself has no MLPerf result, so this uses their average`}.`]:
       im.calFrom===S.gpu?["cal",`Corrected by ${im.calN} vLLM runs`,`Estimated from bandwidth and compute, then corrected with our ${im.calN} vLLM runs on this GPU (other models or settings).`]:
       im.calFrom?["est","Borrowed correction",`${apple?"vLLM does not run on Apple GPUs; this is a rough MLX or llama.cpp-class estimate. ":""}No vLLM runs on this GPU: estimated from bandwidth and compute, corrected with our runs on the ${GPUS[im.calFrom].name}.`]:
       ["est","Roofline estimate","Estimated from GPU memory bandwidth and compute. No vLLM runs to correct it."];
@@ -637,7 +640,7 @@ function renderMain(){
   $("mmeta").textContent=parts.join(" · ");fillInput();
   $("gmeta").innerHTML=`<div class="gsn"><span>Selected GPU</span><b>${g.name}</b>${gpuTag(g)}</div><div class="gss"><span><b>${g.vram} GB</b>memory</span><span><b>${g.bw} TB/s</b>bandwidth</span><span><b>${g.tf.toLocaleString()} TFLOPS</b>${g.unified?"FP16 GPU":"BF16 dense"}</span><span><b>${g.rate!=null?"$"+g.rate.toFixed(2)+"/hr":g.unified?"not for rent":"no rate"}</b>${g.rate!=null?g.rsrc:"per GPU"}</span></div>`;
   $("customgpu").hidden=S.gpu!=="custom";$("rankf").hidden=S.method==="full";
-  $("zeronote").textContent={0:"Every GPU holds a full copy. Simplest, most memory.",1:"Splits optimizer state across GPUs.",2:"Also splits gradients.",3:"Also splits the weights (FSDP). Least memory per GPU, reproduces our measured runs."}[S.zero]+(FT(S.gpu,S.model).n===1?" No effect on 1 GPU.":"");
+  $("zeronote").textContent=S.zero==="auto"?(()=>{const f=FT(S.gpu,S.model);return f.n>1?`Picks the cheapest stage that fits: ZeRO-${f.zero} for this job.`:"Picks the cheapest stage that fits. No effect on 1 GPU.";})():{0:"Every GPU holds a full copy. Simplest, most memory.",1:"Splits optimizer state across GPUs.",2:"Also splits gradients.",3:"Also splits the weights (FSDP). Least memory per GPU, reproduces our measured runs."}[S.zero]+(FT(S.gpu,S.model).n===1?" No effect on 1 GPU.":"");
   syncControls();
   $("preset").value=S.preset;toggles();
   gpuCards();chips();
@@ -647,16 +650,16 @@ function renderMain(){
 function sideFt(g,m){
   const r=FT(S.gpu,S.model),ok=r.fits&&r.quoted,hasCost=ok&&r.cost!=null;
   const all=vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost),fb=all.filter(x=>GPUS[x[0]].fleet);
-  if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(!r.quoted)statusEl("NEEDS CALIBRATION","st-warn");else if(r.n>1)statusEl(S.ngpu?`RUNS ON ${r.n} GPUS`:`NEEDS ${r.n} GPUS`,"st-multi");else statusEl("FITS ON 1 GPU","st-ok");
+  if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(!r.quoted)statusEl("NEEDS CALIBRATION","st-warn");else if(r.n>1)statusEl(S.ngpu?`RUNS ON ${r.n} GPUS${S.ngpu>r.n?" (BOX MAX)":""}`:`NEEDS ${r.n} GPUS`,"st-multi");else statusEl("FITS ON 1 GPU","st-ok");
   $("big").textContent=hasCost?money(r.cost):ok?dur(r.hours):"n/a";
-  $("under").textContent=hasCost?`${dur(r.hours)} on ${r.n}x ${g.name}`:ok?`${dur(r.hours)} on ${r.n}x ${g.name} · ${g.tier==="custom"?"add a rate to see cost":g.unified?"not for rent, no cost":"no rate on file"}`:!r.fits?"needs "+r.why:r.why;
+  $("under").textContent=hasCost?`${dur(r.hours)} on ${r.n}x ${g.name}`:ok?`${dur(r.hours)} on ${r.n}x ${g.name} · ${g.tier==="custom"?"add a rate to see cost":g.unified?"not for rent, no cost":"no rate on file"}`:!r.fits?(/^(needs|more than|does not|sequences)/.test(r.why||"")?r.why.replace(/^more than/,"needs more than"):"needs "+r.why):r.why;
   $("chip").hidden=!hasCost;if(hasCost)$("chip").innerHTML=`capped at <b>${money(r.cap)}</b> (${S.cov}%)`;
   $("mini").innerHTML=mini([[ok?dur(r.hours):"n/a","time"],[ok?fmtK(r.jobTok)+" tok/s":"n/a","throughput"],[ok?Math.round(r.mfu)+"%":"n/a","GPU use"]]);
   $("ftsum").innerHTML=`<b>${r.tt>=1e9?(r.tt/1e9).toFixed(2)+"B":(r.tt/1e6).toFixed(1)+"M"}</b><small>= ${int(num("rows"))} x ${int(num("seq"))} x ${int(num("epochs"))} epoch${num("epochs")>1?"s":""}</small>`;
   archChips(m,[["Method",{lora:"LoRA",qlora:"QLoRA",full:"Full",dpo:"DPO"}[S.method]],["Base",S.method==="qlora"?"NF4":"BF16"]]);
   if(S.st==="perf")$("srows").innerHTML=ok?
     row("Time to train",dur(r.hours),r.hours<0.5?'<span class="warn">training only; startup (image, model load) not modelled</span>':"training wall clock")+row("Throughput",`${int(r.jobTok)} tok/s`,r.tag==="M"&&r.adj.length?"our measured run, adjusted":TAG[r.tag],r.n>1?`${int(r.eff)} per GPU`:"")+
-    row("GPUs",`${r.n}x ${short(S.gpu)}`,S.ngpu?"as you chose":"fewest that fit in memory")+row("Method",{lora:"LoRA",qlora:"QLoRA 4-bit",full:"Full",dpo:"DPO"}[S.method],`${S.optim}${S.method!=="full"?", rank "+S.rank:""}`)+
+    row("GPUs",`${r.n}x ${short(S.gpu)}`,S.ngpu?(S.ngpu>r.n?`capped: a ${short(S.gpu)} box holds ${g.maxN}`:"as you chose"):"fewest that fit in memory")+row("Method",{lora:"LoRA",qlora:"QLoRA 4-bit",full:"Full",dpo:"DPO"}[S.method],`${S.optim}${S.method!=="full"?", rank "+S.rank:""}`)+
     row("Trainable params",r.mem.trainable<1?(r.mem.trainable*1000).toFixed(0)+"M":r.mem.trainable.toFixed(1)+"B","of "+fmtP(m.p))+
     row("GPU utilisation",`${Math.round(r.mfu)}%`,"MFU on useful tokens")+row("Samples per second",r.sps.toFixed(2),`${r.stepsPerSec.toFixed(3)} optimizer steps/s`)+row("Global batch",`${r.gbatch} samples`,`${S.fbatch} x ${S.accum} accumulation x ${r.n} GPU${r.n>1?"s":""}`)+row("Optimizer steps",int(r.steps),"over the whole run")+(r.adj.length?`<div class="r adj"><span class="l">Adjusted from measured<small>setup differs from our runs</small></span><ul>${r.adj.map(x=>typeof x==="string"?`<li>${x}</li>`:`<li title="${x.ids.join("\n")}">${x.text}</li>`).join("")}</ul></div>`:"")
     :row("Status",!r.fits?"does not fit":r.why);
@@ -676,12 +679,12 @@ function sideFt(g,m){
 function sideInf(g,m){
   const r=INF(S.gpu,S.model),Cin=num("conc"),hasCost=r.fits&&r.perM!=null;
   if(r.over)statusEl("NOT ENOUGH GPUS","st-bad");else if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(r.offGB>0)statusEl(`FITS WITH OFFLOAD · ${gb(r.offGB)} GB OFF-GPU`,"st-warn");else if(r.queued)statusEl(r.cmax===1?"ONLY 1 USER FITS":`ONLY ${r.cmax} USERS FIT`,"st-warn");else statusEl(`FITS · UP TO ${int(r.cmax)} USERS`,"st-ok");
-  archChips(m,[["Weights",$("wq").selectedOptions[0].text.split(" ")[0]],["KV cache",$("kvq").selectedOptions[0].text.split(" ")[0]],["GPUs",r.R>1?`${r.N}: ${r.R} x ${r.unitN}`:r.pp>1?`${r.N}: ${r.tp} TP x ${r.pp} boxes`:`${r.N} TP`]]);
+  archChips(m,[["Weights",NO_FA2.has(S.gpu)&&S.wq==="bf16"?"FP16 (no BF16 on this GPU)":$("wq").selectedOptions[0].text.split(" ")[0]],["KV cache",$("kvq").selectedOptions[0].text.split(" ")[0]],["GPUs",r.R>1?`${r.N}: ${r.R} x ${r.unitN}`:r.pp>1?`${r.N}: ${r.tp} TP x ${r.pp} boxes`:`${r.N} TP`]]);
   {const box=GPUS[S.gpu].maxN||8,boxes=Math.ceil(r.N/box),unit=r.unitN||r.N;
   $("topohint").textContent=r.N?(r.R>1?`${r.N} GPUs: ${r.R} copies of the model on ${unit} GPU${unit>1?"s":""} each${r.tp>1?" (tensor parallel)":""}${r.pp>1?`, ${r.pp} boxes per copy`:""}${boxes>1?`, ${boxes} boxes`:""}`
     :r.pp>1?`${r.N} GPUs: ${r.tp} per box x ${r.pp} boxes, pipeline across boxes (not measured)`:`${r.N} GPU${r.N>1?"s":""} in one box`)+(S.igpu?"":" · auto"):"";}
   $("big").textContent=r.fits?`${tpsF(r.agg)} tok/s`:"n/a";
-  $("under").textContent=r.ctxOver?r.why+".":r.fits?`total output for ${r.B} in flight · ${tpsF(r.perUser)} tok/s each`:r.over?r.why+`. A ${short(S.gpu)} box holds up to ${GPUS[S.gpu].maxN||8}.`:"weights plus one sequence do not fit"+fitTip()+".";
+  $("under").textContent=r.ctxOver?r.why+".":r.fits?(r.B===1?`one user: ${tpsF(r.perUser)} tok/s while streaming, lower averaged over first-token waits`:`total output for ${int(r.B)} in flight · ${tpsF(r.perUser)} tok/s each`):r.over?r.why+`. A ${short(S.gpu)} box holds up to ${GPUS[S.gpu].maxN||8}.`:"weights plus one sequence do not fit"+fitTip()+".";
   $("chip").hidden=!hasCost;if(hasCost)$("chip").innerHTML=`<b>${money(r.perM)}</b> per 1M output tokens`;
   const bound=r.fits?(r.tcomp>=r.tmem?"compute-bound":"memory-bound"):"";
   $("mini").innerHTML=mini([[r.fits?ms(r.ttft):"n/a","first token"],[r.fits?tpotF(r.tpot):"n/a","per token"],[r.fits?int(r.cmax):"n/a","max users"]]);
@@ -697,8 +700,11 @@ function sideInf(g,m){
     marketRow(g)+row("Energy per 1M tok",r.fits?`${gb(r.wh1m)} Wh`:"n/a","at full GPU power")+
     row("Carbon per 1M tok",r.fits?`${int(r.wh1m*S.gco2/1000)} g CO2e`:"n/a",`<input id="gco2" type="number" min="0" step="25" value="${S.gco2}"> g/kWh`,"475 = global average");
     bindApiInf();}
-  const N=r.N,mm=r.mem||{weights:r.wGB,kv:0,act:0,ovh:1.6*N,off:0},d=S.memv==="total"?1:N,cap=vramOf(g)*N/d,used=(mm.weights+mm.kv+mm.act+mm.ovh)/d;
-  memory([{n:"Model weights",v:mm.weights/d,c:"#5b9cf5"},{n:"KV cache",v:mm.kv/d,c:"#8b6cf0"},{n:"Activations",v:mm.act/d,c:"#29B473"},{n:"Framework overhead",v:mm.ovh/d,c:"#f2c94c"},{n:"Free",v:Math.max(0,cap-used),c:"#3a404c"},{n:"Offloaded",v:(mm.off||0)/d,c:"#f08a3c",inv:1,opt:1}],cap,`${gb(used)} of ${gb(cap)} GB ${d===1&&N>1?"across "+N+" GPUs":"per GPU"}${d>1?" · "+N+" GPUs":""}`);
+  if(r.ctxOver){$("mbar").innerHTML="";$("mcards").innerHTML="";$("memt").textContent=r.why;return;}
+  // r.mem is one copy of the model (unitN GPUs); R copies make up the deployment
+  const U=r.unitN||r.N||1,R=r.R||1,N=U*R,mm0=r.mem||{weights:r.wGB||0,kv:0,act:0,ovh:1.6*U,off:0},T=S.memv==="total",k=T?R:1/U,
+    mm={weights:mm0.weights*k,kv:mm0.kv*k,act:mm0.act*k,ovh:mm0.ovh*k,off:(mm0.off||0)*k},d=1,cap=vramOf(g)*(T?N:1),used=mm.weights+mm.kv+mm.act+mm.ovh;
+  memory([{n:"Model weights",v:mm.weights/d,c:"#5b9cf5"},{n:"KV cache",v:mm.kv/d,c:"#8b6cf0"},{n:"Activations",v:mm.act/d,c:"#29B473"},{n:"Framework overhead",v:mm.ovh/d,c:"#f2c94c"},{n:"Free",v:Math.max(0,cap-used),c:"#3a404c"},{n:"Offloaded",v:(mm.off||0)/d,c:"#f08a3c",inv:1,opt:1}],cap,`${gb(used)} of ${gb(cap)} GB ${T&&N>1?"across "+N+" GPUs":"per GPU"}${!T&&N>1?" · "+N+" GPUs"+(R>1?` (${R} copies of ${U})`:""):""}`);
 }
 function marketRow(g){const e=Object.entries(g.mkt);
   if(!g.fleet)return row("GPU-hour vs market","n/a",g.rate==null?(g.unified?"buy only, no rental price":"no rate on file"):"list price shown");
@@ -738,7 +744,7 @@ function explore(){
 const COL={M:"#29B473",P:"#f2b13c",X:"#7d8794"},GRID="#22262f",TXT="#6b7482";
 function cvs(){const c=$("cv"),d=Math.min(devicePixelRatio||1,2),w=c.clientWidth,h=c.clientHeight;c.width=w*d;c.height=h*d;const x=c.getContext("2d");x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);x.font="11.5px Inter,system-ui";return[x,w,h];}
 const fmtY=v=>v<1e-9?"$0":Math.abs(v-Math.round(v))<1e-9?"$"+Math.round(v):v<0.1?"$"+v.toFixed(3):v<10?"$"+v.toFixed(2):"$"+Math.round(v);
-const fmtK=v=>v>=1e6?(v/1e6).toFixed(1)+"M":v>=1e4?(v/1e3).toFixed(0)+"k":v>=1e3?(v/1e3).toFixed(1)+"k":Math.round(v)+"";
+const fmtK=v=>v>=1e6?(v/1e6).toFixed(1)+"M":v>=1e4?(v/1e3).toFixed(0)+"k":v>=1e3?(v/1e3).toFixed(1)+"k":v<1?v.toFixed(2):v<10?v.toFixed(1):Math.round(v)+"";
 const fmtA=v=>v>0&&v<10&&Math.abs(v-Math.round(v))>1e-9?v.toFixed(1):fmtK(v).replace(/\.0(?=[kM])/,"");
 const niceStep=raw=>{const p=Math.pow(10,Math.floor(Math.log10(raw)));return[1,2,2.5,5,10].map(k=>k*p).find(k=>k>=raw*0.999);};
 const nice=v=>{if(!(v>0))return{max:1,step:0.25,n:4};const st=niceStep(v/4),n=Math.ceil(v/st-1e-9);return{max:st*n,step:st,n};};
@@ -765,9 +771,9 @@ function bands(rows){const[x,w,h]=cvs();if(!rows.length)return empty(x,w,h,"No G
     x.fillStyle="rgba(41,180,115,.28)";x.beginPath();x.roundRect(X(r.lo),cy-6,Math.max(4,X(r.hi)-X(r.lo)),12,6);x.fill();x.fillStyle=COL[r.tag];x.beginPath();x.arc(X(r.lo),cy,5,0,7);x.fill();
     x.textAlign="right";x.fillStyle=cur?"#eceff4":"#a0a8b6";x.fillText(lab(r),pad.l-12,cy+4);x.textAlign="left";x.fillText(`${money(r.lo)} (cap ${money(r.hi)})`,X(r.hi)+10,cy+4);});x.textAlign="left";}
 function curve(r){const[x,w,h]=cvs();if(!r.fits)return empty(x,w,h,"Does not fit"+fitTip()+".");
-  const pad={l:56,r:52,t:16,b:38},cmax=Math.min(r.cmax,2048),top=Math.max(2,Math.pow(2,Math.ceil(Math.log2(cmax)))),Cs=[];
+  const pad={l:56,r:52,t:16,b:38},cmax=Math.min(r.cmax,Math.max(2048,num("conc"))),top=Math.max(2,Math.pow(2,Math.ceil(Math.log2(cmax)))),Cs=[];
   for(let c=1;c<=cmax;c=c<8?c+1:Math.ceil(c*1.25))Cs.push(c);if(Cs[Cs.length-1]!==cmax)Cs.push(cmax);
-  const pts=Cs.map(c=>inf(S.gpu,model(S.model),{...infOpt(c),ngpu:r.N})),na=nice(Math.max(...pts.map(p=>p.agg))*1.08),ym=na.max,us=niceStep(Math.max(...pts.map(p=>p.perUser))*1.08/na.n),ys=us*na.n;
+  const lay={tp:r.tp||1,pp:r.pp||1,R:r.R||1},pts=Cs.map(c=>inf(S.gpu,model(S.model),{...infOpt(c),fixLayout:lay})),na=nice(Math.max(...pts.map(p=>p.agg))*1.08),ym=na.max,us=niceStep(Math.max(...pts.map(p=>p.perUser))*1.08/na.n),ys=us*na.n;
   const lt=Math.log2(top),X=c=>pad.l+Math.log2(c)/lt*(w-pad.l-pad.r),Y=v=>h-pad.b-v/ym*(h-pad.t-pad.b),Y2=v=>h-pad.b-v/ys*(h-pad.t-pad.b);
   for(let i=0;i<=na.n;i++){const v=na.step*i;x.strokeStyle=GRID;x.beginPath();x.moveTo(pad.l,Y(v));x.lineTo(w-pad.r,Y(v));x.stroke();x.fillStyle=TXT;x.textAlign="left";x.fillText(fmtA(v),8,Y(v)+4);x.fillStyle="#c9953a";x.textAlign="right";x.fillText(fmtA(us*i),w-6,Y(v)+4);}
   x.fillStyle=TXT;x.textAlign="center";for(let c=1;c<=top;c*=2)x.fillText(c,X(c),h-20);x.fillText("concurrent users (log scale)",(w+pad.l)/2,h-4);
@@ -793,7 +799,7 @@ function matrix(){const isFt=S.mode==="ft",allG=vis(),needRate=S.mv==="cost",gks
       h+=`<td class="${cur}${c.val===lo&&GPUS[c.gk].fleet?" lo":""}" ${d}>${isFt?(S.mv==="cost"?money(c.val):dur(c.val)):(S.mv==="cost"?money(c.val):fmtK(c.val))}${xn}<span class="t t-${tag}">${tag}</span></td>`;}
     h+="</tr>";}
   $("mx").innerHTML=h+"</tbody>";
-  $("mleg").innerHTML=(isFt?`<span><b class="t t-M">M</b> measured</span><span><b class="t t-P">P</b> predicted</span><span><b class="t t-X">X</b> specs</span>`:`<span><b class="t t-X">X</b> estimate</span><span>n/fit = try INT4 or more GPUs</span>`)+`<span class="good">green = best on our fleet</span><span>click a cell</span>`+(hid?`<span>${hid} GPU${hid>1?"s":""} hidden: ${needRate?"no rate or ":""}cannot run these models</span>`:"");}
+  $("mleg").innerHTML=(isFt?`<span><b class="t t-M">M</b> measured</span><span><b class="t t-P">P</b> predicted</span><span><b class="t t-X">X</b> specs</span>`:`<span><b class="t t-M">M</b> our vLLM run</span><span><b class="t t-P">P</b> corrected by our runs on this GPU</span><span><b class="t t-X">X</b> estimate</span><span>n/fit = try INT4 or more GPUs</span>`)+`<span class="good">green = best on our fleet</span><span>click a cell</span>`+(hid?`<span>${hid} GPU${hid>1?"s":""} hidden: ${needRate?"no rate or ":""}cannot run these models</span>`:"");}
 
 /* live preview */
 const SIMTXT="Here is a summary of the quarterly results. Revenue grew in every region, led by strong demand for GPU capacity. Utilisation on the committed A100 nodes rose week over week, and fine-tuning jobs now make up the largest share of usage. Next quarter the focus is on inference: faster first tokens, more users per GPU, and a lower cost per request. ".repeat(3).trim().split(" ");
@@ -822,7 +828,8 @@ $("conc").addEventListener("input",render);
 ["method","optim","rank","wq","kvq"].forEach(id=>$(id)&&$(id).addEventListener("change",e=>{S[id]=id==="rank"?+e.target.value:e.target.value;render();}));
 $("fbatch").addEventListener("input",e=>{S.fbatch=Math.max(1,+e.target.value||1);});
 $("ibatch").addEventListener("input",e=>{S.ibatch=Math.max(1,+e.target.value||1);});
-["maxseq","accum","igpu","zero","ngpu"].forEach(id=>$(id).addEventListener("change",e=>{S[id]=+e.target.value;render();}));
+["maxseq","accum","igpu","ngpu"].forEach(id=>$(id).addEventListener("change",e=>{S[id]=+e.target.value;render();}));
+$("zero").addEventListener("change",e=>{S.zero=e.target.value==="auto"?"auto":+e.target.value;render();});
 $("memv").addEventListener("change",e=>{S.memv=e.target.value;render();});
 $("toggles").addEventListener("click",e=>{const b=e.target.closest(".rst");if(!b)return;e.preventDefault();const base=PRESETS[S.basePreset]||PRESETS.measured;S[b.dataset.r]=!!base[b.dataset.r];
   S.preset=TOG.every(([k])=>!!S[k]===!!base[k])?S.basePreset:"custom";render();});
@@ -844,7 +851,7 @@ if(qs.get("mode")==="inf")S.mode="inf";if(qs.get("model")in MODELS||qs.get("mode
 if(["dc","ws","mac","fleet","all"].includes(qs.get("gf")))S.gf=qs.get("gf");if(qs.get("cov")==="80")S.cov=80;if(qs.get("st")==="cost")S.st="cost";if(qs.get("xt"))S.xt=qs.get("xt");
 for(const[k,id]of Object.entries(UI_IN))if(qs.has(k)&&(qs.get(k)===""||isFinite(+qs.get(k))))$(id).value=clampV(id,qs.get(k));
 if(!qs.has("ig")&&(qs.has("sg")||qs.has("tp"))){const n=qs.get("rg")==="cluster"?(+qs.get("tp")||1)*(+qs.get("pp")||1):+qs.get("sg")||1;qs.set("ig",String(n));}   /* links made before the GPUs control merged TP, PP and cluster */
-for(const[k,id]of Object.entries(UI_SEL))if(qs.has(k)&&[...$(id).options].some(o=>o.value===qs.get(k))){$(id).value=qs.get(k);const v=qs.get(k);S[id]=["rank","maxseq","accum","igpu","zero","ngpu"].includes(id)?+v:v;}
+for(const[k,id]of Object.entries(UI_SEL))if(qs.has(k)&&[...$(id).options].some(o=>o.value===qs.get(k))){$(id).value=qs.get(k);const v=qs.get(k);S[id]=["rank","maxseq","accum","igpu","ngpu"].includes(id)||(id==="zero"&&v!=="auto")?+v:v;}
 {let tg=qs.get("tg")||"";if(/^[01]{8}$/.test(tg))tg=tg.slice(0,3)+tg.slice(4);if(/^[01]{7}$/.test(tg))TK.forEach((k,i)=>S[k]=tg[i]==="1");}/* old links carried paged at index 3 */if(qs.get("pr")in{measured:1,memory:1,speed:1,custom:1})S.preset=qs.get("pr");
 S.fbatch=num("fbatch");S.ibatch=1;
 {const c=GPUS.custom;c.vram=+$("cg_vram").value||24;c.bw=+$("cg_bw").value||1;c.tf=+$("cg_tf").value||100;c.rate=$("cg_rate").value===""?null:+$("cg_rate").value;}

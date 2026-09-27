@@ -165,7 +165,7 @@
     const pairs = [];
     for (const r of trainRows(r => r.method === method && isBase(r))) {
       const lc = measuredCurve(r.gpu, r.model, "lora", 1, null);       // LoRA at the same tokens processed per step
-      if (lc) { const T = r.batch * r.seq * (method === "dpo" ? 2 : 1), l = curveAt(lc, T);
+      if (lc) { const T = r.batch * r.seq * (method === "dpo" ? 2 : 1), l = curveAt(lc, T, method === "dpo" ? null : r.seq);
         if (T >= lc[0].T * 0.99 && T <= lc[lc.length - 1].T * 1.01) pairs.push({ gpu: r.gpu, f: r.tok / l.tok, run: r.run_id }); }
     }
     const own = pairs.filter(p => p.gpu === gk), use = own.length ? own : pairs;
@@ -179,15 +179,23 @@
     const d = n > 1 ? distOf(zero) : "none";
     if (!d) return null;
     const pts = trainRows(r => r.gpu === gk && r.model === key && r.method === method && r.n === n && r.dist === d && sameSettings(r))
-      .map(r => ({ T: r.batch * r.seq, tok: r.tok, run: r.run_id }));
-    // repeated runs of the same setup are averaged (geometric mean); their spread is run-to-run noise
-    const byT = {}; for (const p of pts) (byT[p.T] = byT[p.T] || []).push(p);
-    const out = Object.values(byT).map(g => ({ T: g[0].T, tok: gmean(g.map(p => p.tok)), run: g.map(p => p.run).join("+"), reps: g.length }));
+      .map(r => ({ T: r.batch * r.seq, seq: r.seq, tok: r.tok, run: r.run_id }));
+    // repeats of the same (batch, sequence) are averaged; the same tokens per step at a shorter sequence is a
+    // different setup (less attention per token), so it stays a separate point
+    const byK = {}; for (const p of pts) (byK[p.T + "|" + p.seq] = byK[p.T + "|" + p.seq] || []).push(p);
+    const out = Object.values(byK).map(g => ({ T: g[0].T, seq: g[0].seq, tok: gmean(g.map(p => p.tok)), run: g.map(p => p.run).join("+"), reps: g.length }));
     out.sort((a, b) => a.T - b.T);
     return out.length ? out : null;
   }
   // processed tok/s at T tokens per step: log-linear between measured points, the nearest point outside them
-  function curveAt(pts, T) {
+  function curveAt(all, T, seq) {
+    // exact setup first; else interpolate over tokens per step among runs at the same sequence length when they
+    // bracket T; else among all runs (one point per step size, averaging different sequence lengths)
+    if (seq) { const ex = all.find(p => p.seq === seq && Math.abs(p.T / T - 1) < 0.02); if (ex) return { tok: ex.tok, runs: [ex.run], exact: true }; }
+    const same = seq ? all.filter(p => p.seq === seq) : [];
+    let pts = same.length >= 2 && T >= same[0].T && T <= same[same.length - 1].T ? same : null;
+    if (!pts) { const byT = {}; for (const p of all) (byT[p.T] = byT[p.T] || []).push(p);
+      pts = Object.values(byT).map(g => ({ T: g[0].T, tok: gmean(g.map(p => p.tok)), run: g.map(p => p.run).join("+") })).sort((a, b) => a.T - b.T); }
     if (T <= pts[0].T) return { tok: pts[0].tok, runs: [pts[0].run], exact: Math.abs(T / pts[0].T - 1) < 0.02 };
     const last = pts[pts.length - 1];
     if (T >= last.T) return { tok: last.tok, runs: [last.run], exact: Math.abs(T / last.T - 1) < 0.02 };
@@ -280,7 +288,7 @@
     for (const r of trainRows(r => r.n > 1 && r.dist === d && sameSettingsF(r) && r.method === "lora" && MODELS[r.model])) {
       const c = measuredCurve(r.gpu, r.model, "lora", 1, null); if (!c) continue;
       const T = r.batch * r.seq; if (T < c[0].T * 0.99 || T > c[c.length - 1].T * 1.01) continue;
-      pts.push({ gpu: r.gpu, N: MODELS[r.model].f, n: r.n, e: r.tok / curveAt(c, T).tok, run: r.run_id });
+      pts.push({ gpu: r.gpu, N: MODELS[r.model].f, n: r.n, e: r.tok / curveAt(c, T, r.seq).tok, run: r.run_id });
     }
     return pts;
   }
@@ -399,7 +407,7 @@
     const curve = measuredCurve(gk, key, meth0, n, o.zero == null ? 3 : o.zero);
     let dr = null;
     if (curve) {   // measured processed tok/s at this step size; expressed in the curve's convention so the later factors line up
-      const c = curveAt(curve, Tstep); dr = { run_id: c.runs.join(", "), exact: c.exact };
+      const c = curveAt(curve, Tstep, Math.round(Lp)); dr = { run_id: c.runs.join(", "), exact: c.exact };
       base = c.tok / PAD / (stepFactor(Tstep, m.f, gk) ?? Math.pow(Lp / 2048, -SEQ_B)); tag = "M"; runs.push(...c.runs);
     }
     let k = 1;

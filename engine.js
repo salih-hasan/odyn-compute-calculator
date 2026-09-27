@@ -18,7 +18,7 @@
   const scaleLaw = (n, b) => { if (n <= 1) return 1; const base = b <= 8 ? 0.79 : b >= 70 ? 0.93 : 0.79 + (b - 8) / 62 * 0.14;
     return Math.max(0.3, 1 - (1 - base) * Math.log(n) / Math.log(4)); };
   const etaN = (n, b) => n > 1 ? MULTI_B * scaleLaw(n, b) : 1;
-  const CAP = { 80: { f: 1.143, cov: "108/131" }, 90: { f: 1.247, cov: "117/131" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
+  const CAP = { 80: { f: 1.119, cov: "147/193" }, 90: { f: 1.22, cov: "173/193" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
   const KV_UTIL = 0.90;
 
   // measured content-token throughput per GPU at seq 2048; [tok/s, gpus in run]
@@ -85,14 +85,35 @@
   }
   // GPU count to layout, as vLLM deploys it: tensor parallel inside one box, one pipeline stage per extra box.
   // ngpu 0 = auto: the fewest GPUs that hold every requested user, else the fewest that fit at all.
+  // A deployment of N GPUs is R identical replicas (vLLM data parallel, requests split evenly), each tp x pp GPUs.
+  // A model that fits on one GPU is served by replicas, not by splitting it; pipeline stages only appear across boxes.
   function inf(gk, m, o) {
     if (o.ngpu === undefined) return inf1(gk, m, o);
-    const g = o.gpu || GPUS[gk], box = o.gpn || g.maxN || 8, lay = N => ({ ...o, tp: Math.min(N, box), pp: Math.max(1, N / box), gpn: box, link: "auto" });
-    if (o.ngpu > 0) return inf1(gk, m, lay(o.ngpu));
-    const opts = [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64].filter(N => N <= (o.maxGpus || 64) && (N <= box || N % box === 0));
+    const g = o.gpu || GPUS[gk], box = o.gpn || g.maxN || 8;
+    const maxG = g.v === "Apple" ? box : Math.min(o.maxGpus || 64, 64);         // Macs are not clustered here
+    if (m.ctx && o.pin + o.pout > m.ctx) return { gk, N: 0, fits: false, over: false, ctxOver: true, why: `prompt + output (${int0(o.pin + o.pout)} tokens) is longer than the model's ${int0(m.ctx)}-token context` };
+    const users = Math.max(1, o.C) * (o.batch || 1);
+    const units = []; for (let tp = 1; tp <= box; tp *= 2) units.push({ tp, pp: 1 });
+    for (let pp = 2; pp * box <= maxG; pp++) units.push({ tp: box, pp });
+    const at = N => {   // best layout on exactly N GPUs: serves every user if any does, then highest throughput
+      let best = null;
+      for (const u of units) { const R = N / (u.tp * u.pp); if (!Number.isInteger(R) || R < 1) continue;
+        const r = inf1(gk, m, { ...o, tp: u.tp, pp: u.pp, gpn: box, link: "auto", C: Math.ceil(Math.max(1, o.C) / R) });
+        if (!r.fits) continue; const x = replicate(r, R, o), ok = x.cmax >= users;
+        // units go smallest first, so a bigger split must be >10% faster to win: replicas are what people deploy
+        if (!best || (ok && !best.ok) || (ok === best.ok && x.agg > best.x.agg * 1.1)) best = { x, ok }; }
+      return best;
+    };
+    if (o.ngpu > 0) { const b = at(Math.min(o.ngpu, maxG)); return b ? b.x : inf1(gk, m, { ...o, tp: Math.min(o.ngpu, box), pp: Math.max(1, Math.ceil(o.ngpu / box)), gpn: box, maxGpus: maxG }); }
+    const opts = [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64].filter(N => N <= maxG);
     let first = null;
-    for (const N of opts) { const r = inf1(gk, m, lay(N)); if (!r.fits) continue; if (r.cmax >= Math.max(1, o.C) * (o.batch || 1)) return r; first = first || r; }
-    return first || inf1(gk, m, lay(opts[opts.length - 1] || 1));
+    for (const N of opts) { const b = at(N); if (!b) continue; if (b.ok) return b.x; first = first || b.x; }
+    return first || inf1(gk, m, { ...o, tp: Math.min(maxG, box), pp: Math.max(1, maxG / box), gpn: box, maxGpus: maxG });
+  }
+  function replicate(r, R, o) {
+    if (R === 1) return { ...r, R: 1, unitN: r.N };
+    return { ...r, R, unitN: r.N, N: r.N * R, B: r.B * R, users: Math.min(Math.max(1, o.C), r.users * R), cmax: r.cmax * R,
+      queued: r.B * R < Math.max(1, o.C) * (o.batch || 1), agg: r.agg * R, rph: r.rph * R, kvUsed: r.kvUsed * R, knee: r.knee && r.knee * R };
   }
   function inf1(gk, m, o) {
     const g = o.gpu || GPUS[gk], wq = o.wq || "bf16", wb = WQ[wq] || 2, kvq = KVQ[o.kvq] || 2;
@@ -126,25 +147,30 @@
     const preComm = tp > 1 ? 2 * Lyr * (o.pin * m.h * 2) / LINKBW[link] + 2 * Lyr * AR[link] : 0;
     let ttft = TTFT0 + (o.pin * 2 * bn(m.a) + attnFlops(m, o.pin)) / (peak * PRE_MFU) + preComm;
     // our vLLM measurements: exact match overrides; otherwise a per-GPU correction fitted on our runs
-    const runs = [];
+    const runs = []; let calFrom = null, tpCorr = null;
     if (!o.raw && !o.gpu) {
       const key = keyOf(m), q = wq === "fp8" ? "fp8" : wq === "bf16" || wq === "fp16" ? "none" : null;
-      const exs = q ? inferRows(r => r.gpu === gk && r.model === key && r.quant === q && r.tp === tp && pp === 1 && r.inp === o.pin && r.out === o.pout && r.conc === users * (o.batch || 1) && !o.offload) : [];
+      const exs = q && (o.kvq || "fp16") === "fp16" && offGB === 0 ? inferRows(r => r.gpu === gk && r.model === key && r.quant === q && r.tp === tp && pp === 1 && r.inp === o.pin && r.out === o.pout && r.conc === users * (o.batch || 1)) : [];
       if (exs.length) {   // repeated runs averaged
         st.t = gmean(exs.map(r => r.tpot_ms)) / 1000; ttft = gmean(exs.map(r => r.ttft_ms)) / 1000; st.aggM = gmean(exs.map(r => r.out_tps)); runs.push(...exs.map(r => r.run_id)); }
       else {
-        const cal = q ? inferCal(gk, q) : null;          // a correction only applies to the precision it was measured in
-        if (cal) { st.t *= cal.dec; ttft *= cal.ttft1 * cal.load(users * (o.batch || 1)); runs.push(...cal.runs); }
+        // the vLLM correction (scheduler, kernels, sampling) measured at BF16 also applies to weight-only INT8/INT4 and to FP8
+        // where FP8 was not run; a GPU with no vLLM runs borrows the nearest measured GPU's correction
+        const own = inferCal(gk, q || "none") || (q === "fp8" ? inferCal(gk, "none") : null);
+        const src = own ? gk : nearestInferGpu(gk), cal = own || (src ? inferCal(src, "none") : null);
+        if (cal) { st.t *= cal.dec; ttft *= cal.ttft1 * cal.load(users * (o.batch || 1)); runs.push(...cal.runs); calFrom = src; }
+        if (tp > 1) { const c = tpCal(tp); if (c) { st.t *= c.dec; ttft *= c.ttft; runs.push(...c.runs); tpCorr = c; } }
       }
     }
     let bf = null;
     if (wq === "fp8" && !o.raw && !o.gpu && !st.aggM && (runs.length || inferCal(gk, "none"))) {   // FP8 weights read half the bytes of BF16: never slower (only where our vLLM corrections apply)
-      const b = bf = inf(gk, m, { ...o, wq: "bf16" });
+      const b = bf = inf1(gk, m, { ...o, wq: "bf16" });
       if (b.fits && b.tpot / 1000 < st.t) st.t = b.tpot / 1000;
       if (b.fits && b.ttft < ttft) ttft = b.ttft;
     }
-    const agg = st.aggM || B / st.t;
-    const calD = (!o.raw && !o.gpu && runs.length && !st.aggM) ? (inferCal(gk, wq === "fp8" ? "fp8" : "none") || { dec: 1 }).dec : 1;
+    // closed loop, as vllm bench serve runs it: each of the B slots waits for its first token, then streams pout tokens
+    const agg = st.aggM || B * o.pout / (ttft + o.pout * st.t);
+    const calD = (!o.raw && !o.gpu && runs.length && !st.aggM) ? ((calFrom && (inferCal(calFrom, wq === "fp8" && calFrom === gk ? "fp8" : "none") || inferCal(calFrom, "none"))) || { dec: 1 }).dec : 1;
     let knee = null; for (let c = 1; c <= Math.min(cmax, 4096); c++) { const x = stepT(c); if (x.tc >= x.tm) { knee = c; break; } }
     const costH = g.rate == null ? null : g.rate * N * OVERHEAD;
     const act = B * ctx * m.h * 2 / 1e9 * 0.1;
@@ -156,7 +182,8 @@
       per1k: costH == null ? null : costH * (1000 * o.pout / agg) / 3600,
       wh1m: g.tdp * N / (agg * 3600) * 1e6,
       mem: { weights: wGB - offGB, kv: seqGB * B, act, ovh, off: offGB, total: wGB - offGB + seqGB * B + act + ovh, cap: vramOf(g) * N },
-      runs, measured: runs.length > 0
+      runs, measured: runs.length > 0, exact: !!st.aggM, calFrom, calN: calFrom ? (inferCal(calFrom, "none") || {}).n : 0,
+      tpCorr, pinBeyond: !st.aggM && o.pin > MAXPIN() ? MAXPIN() : 0     // first-token load curve extrapolated past our longest measured prompt
     };
   }
   const hasNV = (g, n) => !!g.nvlink || (!!g.nvpair && n <= 2);
@@ -172,16 +199,20 @@
   const trainRows = (f) => (MEAS.train || []).filter(f);
   const isBase = r => r.n === 1 && r.batch === 1 && r.ckpt === 1 && r.attn === "sdpa" && r.optim === "adamw" && r.rank === 16;
   // measured speed of `method` relative to LoRA, same GPU and model, aligned to the same sequence length
-  function methodFactor(gk, method) {
+  function methodFactor(gk, method, N) {
     const pairs = [];
     for (const r of trainRows(r => r.method === method && isBase(r))) {
       const lc = measuredCurve(r.gpu, r.model, "lora", 1, null);       // LoRA at the same tokens processed per step
       if (lc) { const T = r.batch * r.seq * (method === "dpo" ? 2 : 1), l = curveAt(lc, T, method === "dpo" ? null : r.seq);
-        if (T >= lc[0].T * 0.99 && T <= lc[lc.length - 1].T * 1.01) pairs.push({ gpu: r.gpu, f: r.tok / l.tok, run: r.run_id }); }
+        if (T >= lc[0].T * 0.99 && T <= lc[lc.length - 1].T * 1.01) pairs.push({ gpu: r.gpu, f: r.tok / l.tok, run: r.run_id, N: MODELS[r.model] ? MODELS[r.model].f : 0 }); }
     }
-    const own = pairs.filter(p => p.gpu === gk), use = own.length ? own : pairs;
+    // full vs LoRA depends on size: small models are launch bound (LoRA's extra adapter kernels cost more than the weight
+    // gradients it skips), big ones compute bound. Use full-FT runs within 2x of the model's size, never outside.
+    const near = method === "full" && N ? pairs.filter(p => p.N >= N / 2 && p.N <= N * 2) : pairs;
+    const own = near.filter(p => p.gpu === gk), use = own.length ? own : near;
     if (!use.length) return null;
-    return { f: Math.exp(use.reduce((a, p) => a + Math.log(p.f), 0) / use.length), own: !!own.length, runs: use.map(p => p.run) };
+    const sz = use.map(p => p.N);
+    return { f: Math.exp(use.reduce((a, p) => a + Math.log(p.f), 0) / use.length), own: !!own.length, runs: use.map(p => p.run), lo: Math.min(...sz), hi: Math.max(...sz) };
   }
   // measured runs for this GPU, model, method, GPU count and parallelism, as a curve over tokens per GPU per step
   const sameSettings = r => r.ckpt === 1 && r.attn === "sdpa" && r.optim === "adamw" && r.rank === 16;
@@ -190,7 +221,7 @@
     const d = n > 1 ? distOf(zero) : "none";
     if (!d) return null;
     const pts = trainRows(r => r.gpu === gk && r.model === key && r.method === method && r.n === n && r.dist === d && sameSettings(r))
-      .map(r => ({ T: r.batch * r.seq, seq: r.seq, tok: r.tok, run: r.run_id }));
+      .map(r => ({ T: r.batch * r.seq * (r.method === "dpo" ? 2 : 1), seq: r.seq, tok: r.tok, run: r.run_id }));   // DPO: chosen + rejected per sample
     // repeats of the same (batch, sequence) are averaged; the same tokens per step at a shorter sequence is a
     // different setup (less attention per token), so it stays a separate point
     const byK = {}; for (const p of pts) (byK[p.T + "|" + p.seq] = byK[p.T + "|" + p.seq] || []).push(p);
@@ -202,14 +233,15 @@
   function curveAt(all, T, seq) {
     // exact setup first; else interpolate over tokens per step among runs at the same sequence length when they
     // bracket T; else among all runs (one point per step size, averaging different sequence lengths)
-    if (seq) { const ex = all.find(p => p.seq === seq && Math.abs(p.T / T - 1) < 0.02); if (ex) return { tok: ex.tok, runs: [ex.run], exact: true }; }
+    if (seq) { const ex = all.find(p => p.seq === seq && Math.abs(p.T / T - 1) < 0.02); if (ex) return { tok: ex.tok, runs: [ex.run], exact: true, T: ex.T, seq: ex.seq }; }
     const same = seq ? all.filter(p => p.seq === seq) : [];
     let pts = same.length >= 2 && T >= same[0].T && T <= same[same.length - 1].T ? same : null;
     if (!pts) { const byT = {}; for (const p of all) (byT[p.T] = byT[p.T] || []).push(p);
       pts = Object.values(byT).map(g => ({ T: g[0].T, tok: gmean(g.map(p => p.tok)), run: g.map(p => p.run).join("+") })).sort((a, b) => a.T - b.T); }
-    if (T <= pts[0].T) return { tok: pts[0].tok, runs: [pts[0].run], exact: Math.abs(T / pts[0].T - 1) < 0.02 };
+    const seqOf = p => p.seq || (all.find(q => q.T === p.T) || {}).seq;
+    if (T <= pts[0].T) { const ex = Math.abs(T / pts[0].T - 1) < 0.02; return { tok: pts[0].tok, runs: [pts[0].run], exact: ex, clamped: ex ? null : "lo", T: pts[0].T, seq: seqOf(pts[0]) }; }
     const last = pts[pts.length - 1];
-    if (T >= last.T) return { tok: last.tok, runs: [last.run], exact: Math.abs(T / last.T - 1) < 0.02 };
+    if (T >= last.T) { const ex = Math.abs(T / last.T - 1) < 0.02; return { tok: last.tok, runs: [last.run], exact: ex, clamped: ex ? null : "hi", T: last.T, seq: seqOf(last) }; }
     let i = 1; while (pts[i].T < T) i++;
     const a = pts[i - 1], b = pts[i], w = Math.log(T / a.T) / Math.log(b.T / a.T);
     return { tok: Math.exp(Math.log(a.tok) + w * (Math.log(b.tok) - Math.log(a.tok))), runs: [a.run, b.run], exact: false };
@@ -324,6 +356,35 @@
       own: own.length >= 2, maxN: Math.max(...use.map(p => p.n)), runs: use.map(p => p.run) });
   }
   const inferRows = (f) => (MEAS.infer || []).filter(f);
+  let MP; const MAXPIN = () => MP !== undefined ? MP : (MP = Math.max(0, ...(MEAS.infer || []).map(r => r.inp)));
+  // tensor parallel costs more than the roofline's all-reduce term: fitted on our TP 2/4/8 runs against the same model on the same
+  // GPU after its 1-GPU correction, pooled across GPUs; ln(ratio) = b log2(tp) through tp = 1, per-token and first-token separately
+  let TPC;
+  function tpCal(tp) {
+    if (TPC === undefined) {
+      const pts = { dec: [], ttft: [], runs: [] };
+      for (const r of inferRows(r => r.tp > 1 && r.quant === "none" && MODELS[r.model])) {
+        const c = inferCal(r.gpu, "none"); if (!c) continue;
+        const p = inf1(r.gpu, MODELS[r.model], { pin: r.inp, pout: r.out, C: r.conc, batch: 1, wq: "bf16", kvq: "fp16", tp: r.tp, pp: 1, gpn: 8, link: "auto", raw: 1 });
+        if (!p.fits || p.cmax < r.conc) continue; const x = Math.log2(r.tp);
+        pts.dec.push([x, Math.log(r.tpot_ms / (p.tpot * c.dec))]); pts.ttft.push([x, Math.log(r.ttft_ms / (p.ttft * 1000 * c.ttft1 * c.load(r.conc)))]); pts.runs.push(r.run_id);
+      }
+      const b = a => a.length ? a.reduce((s, [x, y]) => s + x * y, 0) / a.reduce((s, [x]) => s + x * x, 0) : 0;
+      TPC = pts.runs.length ? { bd: b(pts.dec), bt: b(pts.ttft), runs: pts.runs, n: pts.runs.length } : null;
+    }
+    if (!TPC) return null; const x = Math.log2(tp);
+    return { dec: Math.exp(Math.max(0, TPC.bd) * x), ttft: Math.exp(Math.max(0, TPC.bt) * x), runs: TPC.runs, n: TPC.n, bd: TPC.bd, bt: TPC.bt };
+  }
+  const specScore = g => W * Math.log(g.tf) + (1 - W) * Math.log(g.bw);
+  // the measured GPU closest in datasheet speed (same vendor first), for GPUs with no runs of their own
+  function nearest(gk, has, anyVendor) {
+    const g = GPUS[gk]; let best = null;
+    for (const k of Object.keys(GPUS)) { if (k === gk || !has(k)) continue; const d = Math.abs(specScore(GPUS[k]) - specScore(g)) + (GPUS[k].v === g.v ? 0 : 10);
+      if (!best || d < best.d) best = { k, d }; }
+    return best && (anyVendor || best.d < 10) ? best.k : null;
+  }
+  const NI = {}; const nearestInferGpu = gk => gk in NI ? NI[gk] : (NI[gk] = nearest(gk, k => inferRows(r => r.gpu === k && r.tp === 1 && r.quant === "none").length > 0, true));
+  const NT = {}; const nearestTrainGpu = gk => gk in NT ? NT[gk] : (NT[gk] = nearest(gk, k => levelMeasured(k) != null));
   let KEYS = null;
   const keyOf = m => { if (!KEYS) { KEYS = new Map(); for (const k in MODELS) KEYS.set(MODELS[k], k); } return KEYS.get(m); };
   // per-GPU correction from our vLLM runs: decode step ratio, first-token ratio at 1 user, and first-token growth with load
@@ -340,10 +401,23 @@
     const ttft1 = one.length ? gm(one.map(r => r.ttft_ms / (pred(r).ttft * 1000))) : 1;
     // first-token time under load relative to 1 user, as measured; log-linear in users between measured points
     const pts = [];
-    for (const r of rows) { const b = one.find(x => x.model === r.model && x.inp === r.inp && x.out === r.out); if (b) pts.push([Math.log(r.conc), Math.log(r.ttft_ms / b.ttft_ms)]); }
+    for (const r of rows) { const b = one.find(x => x.model === r.model && x.inp === r.inp && x.out === r.out);
+      if (b && pred(r).cmax >= r.conc) pts.push([Math.log(r.conc), Math.log(r.ttft_ms / b.ttft_ms)]); }
     pts.sort((a, b) => a[0] - b[0]);
-    const load = C => { if (pts.length < 2) return 1; const x = Math.log(Math.max(1, C)); let i = 1; while (i < pts.length - 1 && pts[i][0] < x) i++;
-      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]; const y = x1 === x0 ? y0 : y0 + (y1 - y0) * (x - x0) / (x1 - x0); return Math.exp(Math.max(0, y)); };
+    // isotonic fit (pool adjacent violators): points come from several models and lengths, and first-token time must not
+    // fall as users are added; interpolate between the pooled levels, the last slope beyond the last measured user count
+    const blk = [];
+    for (const [x, y] of pts) { blk.push({ x0: x, x1: x, s: y, n: 1 });
+      while (blk.length > 1 && blk[blk.length - 2].s / blk[blk.length - 2].n > blk[blk.length - 1].s / blk[blk.length - 1].n) {
+        const b = blk.pop(), a = blk[blk.length - 1]; a.x1 = b.x1; a.s += b.s; a.n += b.n; } }
+    const knots = blk.map(b => [(b.x0 + b.x1) / 2, Math.max(0, b.s / b.n)]);
+    const load = C => { if (!knots.length) return 1; const x = Math.log(Math.max(1, C));
+      if (x <= knots[0][0]) return Math.exp(knots[0][1] * (knots[0][0] > 0 ? x / knots[0][0] : 1));
+      if (x >= knots[knots.length - 1][0]) { const n = knots.length, [xa, ya] = knots[Math.max(0, n - 2)], [xb, yb] = knots[n - 1];
+        const sl = n > 1 && xb > xa ? Math.max(0, (yb - ya) / (xb - xa)) : 0;   // beyond our most users: keep the last measured slope
+        return Math.exp(yb + sl * (x - xb)); }
+      let i = 1; while (knots[i][0] < x) i++; const [x0, y0] = knots[i - 1], [x1, y1] = knots[i];
+      return Math.exp(y0 + (y1 - y0) * (x - x0) / (x1 - x0)); };
     return (CAL[ck] = { dec: Math.min(1.5, Math.max(0.6, dec)), ttft1: Math.min(2, Math.max(0.5, ttft1)), load, runs: rows.map(r => r.run_id), n: rows.length });
   }
 
@@ -392,7 +466,29 @@
     const tok = Math.exp(level(gk) - P * Math.log(m.f)) * eta(n);
     return [tok, ((gk in LVL || levelMeasured(gk) != null) && !m.moe && within) ? "P" : "X", law];
   }
+  // speed of GPU a relative to GPU b on the models both ran (LoRA, base settings, 1 GPU, 2048 tokens per step)
+  const REF2048 = {};
+  function at2048(gk) { if (gk in REF2048) return REF2048[gk]; const o = {};
+    for (const r of trainRows(r => r.gpu === gk && r.method === "lora" && isBase(r) && r.batch * r.seq === 2048)) (o[r.model] = o[r.model] || []).push(r.tok);
+    for (const k in o) o[k] = gmean(o[k]); return (REF2048[gk] = o); }
+  const TR = {};
+  function transferFrom(gk, key, method) {
+    const ck = gk + "|" + key + "|" + method; if (ck in TR) return TR[ck];
+    const mine = at2048(gk); let best = null;
+    for (const k of Object.keys(GPUS)) { if (k === gk) continue; const c = measuredCurve(k, key, method, 1, null); if (!c) continue;
+      const theirs = at2048(k), common = Object.keys(mine).filter(x => x in theirs && x !== key); if (!common.length) continue;
+      // weight shared models by closeness in size to the target: the GPU ratio shrinks for small, launch-bound models
+      const N = MODELS[key] ? MODELS[key].f : 8, w = common.map(x => 1 / (1 + Math.abs(Math.log((MODELS[x] || { f: 8 }).f / N))));
+      const lr = common.reduce((a, x, i) => a + w[i] * Math.log(mine[x] / theirs[x]), 0) / w.reduce((a, b) => a + b, 0);
+      const score = common.length * 10 - Math.abs(specScore(GPUS[k]) - specScore(GPUS[gk]));
+      if (!best || score > best.score) best = { ref: k, curve: c, ratio: Math.exp(lr), common: common.length, score, runs: [] }; }
+    return (TR[ck] = best);
+  }
+  const sizeRange = x => x.lo === x.hi ? `at ${+x.lo.toFixed(1)}B` : `at ${+x.lo.toFixed(1)}-${+x.hi.toFixed(1)}B`;
+  // Volta and Turing: no BF16 (training runs in FP16) and no Flash Attention 2
+  const NO_FA2 = new Set(["v100", "v100-32", "t4"]);
   function ft(gk, m, key, o) {
+    if (NO_FA2.has(gk) && o.flash !== false) o = { ...o, flash: false, _noFa2: 1 };
     const g = GPUS[gk], avg = o.seq || 1024, tt = o.rows * avg * o.epochs;
     const mem = ftMem(m, o);
     // ZeRO / FSDP stage: 0 = plain DDP (every GPU holds everything), 1 shards optimizer state, 2 also gradients,
@@ -404,10 +500,12 @@
     else while (n <= g.maxN && perGpu(n) > vramOf(g) * FT_UTIL) n *= 2;
     if (o.ngpu && perGpu(n) > vramOf(g) * FT_UTIL) return { gk, n, tt: o.rows * (o.seq || 1024) * o.epochs, mem, perGpuGB: perGpu(n), zero: z, fits: false, why: "does not fit on " + n + " GPU" + (n > 1 ? "s" : "") + " at ZeRO-" + z };
     const r = { gk, n, tt, mem, zero: z, perGpuGB: perGpu(Math.min(n, g.maxN)), perGpuAt: perGpu };
+    if (m.ctx && mem.seqEff > m.ctx * 1.001) return { ...r, fits: false, ctxOver: true, why: `sequences of ${int0(mem.seqEff)} tokens exceed the model's ${int0(m.ctx)}-token context` };
     if (n > g.maxN) return { ...r, fits: false, why: "more than " + g.maxN + " GPUs" };
     if (g.ftq === "no" && levelMeasured(gk) == null) return { ...r, fits: true, quoted: false, why: "needs a calibration run" };
     let [base, tag, mlaw] = ftTok(gk, m, key, n, o.zero == null ? 3 : o.zero);
     const adj = [];
+    if (o._noFa2) adj.push("FP16 and no Flash Attention 2 on this GPU");
     if (mlaw && n > 1) adj.push(`${n} GPUs x${mlaw.e(m.f, n).toFixed(2)} per GPU (${(o.zero == null ? 3 : o.zero) >= 3 ? "FSDP" : "DDP"}, measured${mlaw.own ? "" : " on other GPUs"})`);
     let runs = [];
     // an exact measured run replaces the curve; convert to the curve's convention (content tok/s at 2048, 1.3x padding)
@@ -415,13 +513,31 @@
     const Lp = Math.min(32768, Math.max(256, mem.seqEff)), Tstep = (o.batch || 1) * Lp * ((o.method || "lora") === "dpo" ? 2 : 1);
     // our RunPod runs are primary: known processed tokens, same basis as every other GPU and as the price cap.
     // (SDS fleet runs came out 2-16% faster than ours for identical setups, via an assumed 1.3x padding factor.)
-    const curve = measuredCurve(gk, key, meth0, n, o.zero == null ? 3 : o.zero);
-    let dr = null;
-    if (curve) {   // measured processed tok/s at this step size; expressed in the curve's convention so the later factors line up
-      const c = curveAt(curve, Tstep, Math.round(Lp)); dr = { run_id: c.runs.join(", "), exact: c.exact };
-      base = c.tok / PAD / (stepFactor(Tstep, m.f, gk) ?? Math.pow(Lp / 2048, -SEQ_B)); tag = "M"; runs.push(...c.runs);
+    // where the speed comes from, best first: our runs of this model at this GPU count; our 1-GPU runs of it x the measured
+    // multi-GPU efficiency; another GPU's runs of it x the speed ratio of the two GPUs on models both ran (transfer)
+    let curve = null, scale = 1, via = null;
+    // a method with no runs of its own on this model uses this model's LoRA runs x the measured method ratio
+    for (const mth of meth0 === "lora" ? ["lora"] : [meth0, "lora"]) {
+      const viaLora = mth !== meth0;
+      if ((curve = measuredCurve(gk, key, mth, n, z))) { if (viaLora) via = { kind: "lora", viaLora }; break; }
+      if (n > 1 && (curve = measuredCurve(gk, key, mth, 1, null))) { scale = mlaw ? mlaw.e(m.f, n) : etaN(n, m.f); via = { kind: "1gpu", viaLora }; break; }
+      const t = transferFrom(gk, key, mth);
+      if (t) { curve = t.curve; scale = t.ratio * (n > 1 ? (mlaw ? mlaw.e(m.f, n) : etaN(n, m.f)) : 1); via = { kind: "transfer", viaLora, ...t }; break; }
     }
-    let k = 1;
+    // the LoRA curve is read at LoRA's step size (DPO's chosen + rejected pair is one LoRA step of twice the tokens)
+    let dr = null, attnK = 1;
+    if (curve) {   // measured processed tok/s at this step size; expressed in the curve's convention so the later factors line up
+      const c0 = curveAt(curve, Tstep, Math.round(Lp)), c = { ...c0, tok: c0.tok * scale };
+      dr = { run_id: c.runs.join(", "), exact: c.exact && !via, clamped: c.clamped, T: c.T, seq: c.seq, via };
+      // a value clamped to the nearest measured step keeps the step-size law between that step and this one
+      const Tuse = c.clamped ? c.T : Tstep;
+      base = c.tok / PAD / (stepFactor(Tuse, m.f, gk) ?? Math.pow((c.clamped ? c.seq || Lp : Lp) / 2048, -SEQ_B)); tag = c.clamped || via ? "P" : "M"; runs.push(...c.runs); if (via && via.runs) runs.push(...via.runs);
+      // sequences longer than any measured one add attention FLOPs per token (fwd, bwd, recompute) the curve has not seen
+      if (c.seq && Lp > c.seq * 1.02) { const at = s => attnFlops(m, s) / s, ck = mem.flags.ckpt ? 4 : 3, lin = 6 * bn(m.a);
+        attnK = (lin + ck * at(c.seq)) / (lin + ck * at(Lp)); }
+    }
+    let k = attnK;
+    if (attnK < 0.995) adj.push(`attention at ${int0(Lp)} tokens x${attnK.toFixed(2)} (FLOPs, vs our runs at ${int0(dr.seq)}-token sequences)`);
     // tokens per GPU per step (batch x processed length) sets how busy the GPU is; the law is fitted on our runs
     const stf = stepFactor(Tstep, m.f, gk), sf = stf ?? Math.pow(Lp / 2048, -SEQ_B);
     if (Math.abs(sf - 1) > 0.005) { k *= sf; adj.push((stf != null ? "step size " + int0(Tstep) + " tokens" + (stepLaw(gk).own ? "" : " (law from other GPUs)") + " x" : "sequence length x") + sf.toFixed(2)); }
@@ -430,6 +546,8 @@
       if (keep < 0.995) { k *= keep; adj.push("padding to max length x" + keep.toFixed(2)); }
     }
     if (mem.flags.packing) { k *= PAD; adj.push("packing x" + PAD); }
+    else if (mem.flags.dynpad) { const avgT = Math.min(o.seq || 1024, o.maxseq || 2048), padR = mem.seqEff / avgT;   // processed / useful tokens
+      if (Math.abs(padR - PAD) > 0.005) { k *= PAD / padR; adj.push(`padding ${padR.toFixed(2)}x instead of ${PAD}x (max length ${int0(o.maxseq || 2048)})`); } }
     const lab = (name, x) => `${name} x${x.f.toFixed(2)} (measured${x.own === false ? " on other GPUs" : ""})`;
     if (!mem.flags.ckpt) { const x = settingFactor(gk, r => r.ckpt === 0 && r.attn === "sdpa" && r.optim === "adamw" && r.rank === 16);
       if (x) { k *= x.f; runs.push(...x.runs); adj.push(lab("no checkpointing", x)); } else { k *= CKPT_COST; adj.push("no checkpointing x" + CKPT_COST + " (assumed)"); } }
@@ -441,16 +559,21 @@
     if (optName !== "adamw") { const x = settingFactor(gk, r => r.optim === optName && r.ckpt === 1 && r.attn === "sdpa" && r.rank === 16);
       if (x) { k *= x.f; runs.push(...x.runs); adj.push(lab(optName === "adamw8bit" ? "8-bit AdamW" : optName, x)); } }
     const meth = o.method || "lora";
-    if (!dr && meth !== "lora") {                     // method factor: measured ratio if we have one, else the old assumption
-      const mf = methodFactor(gk, meth);
-      if (mf) { k *= mf.f; runs.push(...mf.runs); if (tag === "M") tag = "P"; adj.push(`${meth === "qlora" ? "QLoRA" : meth === "dpo" ? "DPO" : "full fine-tune"} x${mf.f.toFixed(2)} (measured${mf.own ? "" : " on other GPUs"})`); }
-      else if (meth === "full") { const fr = mem.flags.ckpt ? 6 / 8 : 4 / 6; k *= fr; adj.push("full fine-tune x" + fr.toFixed(2) + " (FLOP ratio, not measured)"); }
+    if ((!dr || (dr.via && dr.via.viaLora)) && meth !== "lora") {   // method factor: measured ratio if we have one, else the old assumption
+      const mf = methodFactor(gk, meth, m.f);
+      if (mf) { k *= mf.f; runs.push(...mf.runs); if (tag === "M") tag = "P"; adj.push(`${meth === "qlora" ? "QLoRA" : meth === "dpo" ? "DPO" : "full fine-tune"} x${mf.f.toFixed(2)} (measured${mf.own ? "" : " on other GPUs"}, ${sizeRange(mf)})`); }
+      else if (meth === "full") { const fr = mem.flags.ckpt ? 6 / 8 : 4 / 6; k *= fr; if (tag === "M") tag = "P"; adj.push("full fine-tune x" + fr.toFixed(2) + " (weight-gradient FLOPs; not measured at this size)"); }
       else if (meth === "qlora") adj.push("QLoRA speed taken as LoRA (not measured)");
       else if (meth === "dpo") { k /= DPO; adj.push("DPO x0.50 (assumed)"); }
     }
     if (dr) { const ids = String(dr.run_id).split(/[,+]\s*/).filter(Boolean);   // ids stay in the tooltip, not the text
-      adj.push({ text: dr.exact ? "our measured run" : `interpolated between ${ids.length} measured run${ids.length > 1 ? "s" : ""}`, ids }); }
-    if (m.moe && !dr) { const x = moeFactor();
+      if (dr.via && dr.via.kind === "transfer") adj.push(`from our ${GPUS[dr.via.ref].name} runs of this model x${dr.via.ratio.toFixed(2)} (speed ratio on ${dr.via.common} model${dr.via.common > 1 ? "s" : ""} both GPUs ran)`);
+      if (dr.via && dr.via.kind === "1gpu") adj.push(`from our 1-GPU runs of this model (no ${n}-GPU run)`);
+      if (dr.via && dr.via.viaLora) adj.push("from our LoRA runs of this model");
+      adj.push({ text: dr.exact ? (ids.length > 1 ? `our measured runs (${ids.length} repeats)` : "our measured run") :
+        dr.clamped ? `scaled from our run${ids.length > 1 ? "s" : ""} at ${int0(dr.T)} tokens per step (outside the measured range)` :
+        `interpolated between ${ids.length} measured runs`, ids }); }
+    if (m.moe && !dr) { const x = moeFactor();   // (a curve of this model already includes its routing)
       if (x) { k *= x.f; runs.push(...x.runs); adj.push(`MoE routing x${x.f.toFixed(2)} (measured on ${x.runs.length} MoE run${x.runs.length > 1 ? "s" : ""})`); }
       else adj.push("MoE speed from active params (not measured)"); }
     let eff = base * k;
@@ -464,6 +587,15 @@
       const ar = 2 * mem.grad * 1e9 * fr / bw;
       const t = Math.max(tc, gather) + ar, f = tc / t;
       if (f < 0.995) { eff *= f; adj.push((nvl ? "GPU-to-GPU traffic" : "PCIe traffic between GPUs") + " x" + f.toFixed(2) + " (estimate)"); }
+    }
+    // (an SDS fleet run of this exact model, when there is one, is still used: it is a real measurement)
+    if (!o._sib && levelMeasured(gk) == null && !ANCH[gk + "|" + key]) {
+      const ref = nearestTrainGpu(gk), rr = ref ? ft(ref, m, key, { ...o, ngpu: n, zero: z, _sib: 1 }) : null;
+      if (rr && rr.fits && rr.quoted) {
+        const ratio = Math.exp(B1 * (specScore(g) - specScore(GPUS[ref])));
+        eff = rr.eff * ratio; tag = "X"; runs = rr.runs.slice();
+        adj.length = 0; adj.push(`scaled from our ${GPUS[ref].name} runs by datasheet speed x${ratio.toFixed(2)} (no runs on this GPU)`, ...rr.adj.filter(a => typeof a === "string"));
+      }
     }
     const hours = tt / (eff * n) / 3600, gpuH = hours * n;
     const cost = g.rate == null ? null : gpuH * g.rate * OVERHEAD;

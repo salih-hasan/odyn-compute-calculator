@@ -256,7 +256,8 @@
   function moeFactor() {
     if (MOE !== undefined) return MOE;
     const f = [], runs = [];
-    for (const r of trainRows(r => r.method === "lora" && r.n === 1 && r.batch * r.seq === 2048 && sameSettingsF(r) && MODELS[r.model] && MODELS[r.model].moe)) {
+    for (const r of trainRows(r => r.method === "lora" && r.n === 1 && r.batch * r.seq === 2048 && sameSettingsF(r) && MODELS[r.model] && MODELS[r.model].moe &&
+                                  !/routed experts/.test(r.lora_scope || ""))) {
       const curve = Math.exp(level(r.gpu) - P * Math.log(MODELS[r.model].f)) * PAD; f.push(r.tok / curve); runs.push(r.run_id); }
     return (MOE = f.length ? { f: gmean(f), runs } : null);
   }

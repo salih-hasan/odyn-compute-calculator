@@ -438,7 +438,7 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
     <summary>How we calculate</summary>
     <div class="howbody"><div><b>Method and accuracy report</b>Held-out accuracy on our measured runs, measured hardware vs datasheet, and the tested price cap: <a href="method.html" style="color:var(--acc)">read the report</a>.</div>
       <div><b>Fine-tune throughput</b>From our own benchmark runs (<span id="hw-nt"></span> fine-tune runs on <span id="hw-ng"></span> GPUs: transformers + PEFT, each model's real architecture, full-length sequences). The speed comes from the best source available, in this order: our runs of this model at this GPU count; our 1-GPU runs of it times the measured multi-GPU efficiency; another GPU's runs of it times the speed ratio of the two GPUs on models both ran; for a GPU we never ran, the closest measured GPU scaled by datasheet speed. The card and the Performance tab say which. Speed depends on tokens per GPU per step (batch x processed length), fitted per GPU on our runs; a setup outside the measured range is scaled from the nearest run and labelled so. Each setting is a measured ratio against the same run with base settings (checkpointing off, eager attention, LoRA rank, optimizer, QLoRA, DPO, MoE). Full fine-tune is measured only up to 1.7B, where it is faster than LoRA; beyond twice that size it uses the weight-gradient FLOP ratio and says it is not measured. Sequences longer than any measured run add attention FLOPs. Multi-GPU efficiency is fitted on our 2, 4 and 8 GPU runs against the same run on 1 GPU.</div>
-      <div><b>Price cap</b>A conformal bound on actual vs estimated cost. For each GPU we measured, the engine is rebuilt without that GPU's runs and predicts them; the multiplier is set from the other GPUs' errors. With every GPU held out in turn, the 80% cap (x<span id="hw-c80"></span>) held for <span id="hw-v80"></span> runs and the 90% cap (x<span id="hw-c90"></span>) for <span id="hw-v90"></span>.</div>
+      <div><b>Price cap</b>Set per quote by a hierarchical Bayesian model of the calculator's own held-out errors: each GPU and model gets its own error level, pooled with the rest, and small models get more room. A GPU we measured gets a tight cap (about x1.2 to x1.35 at 90%); a GPU we have not measured gets about x1.5. Tested nested, with the scored GPU or setup never in the fit: the 90% cap held for <span id="hw-vB"></span> held-out runs on measured GPUs and <span id="hw-vA"></span> on unmeasured ones.</div>
       <div><b>Memory</b>Weights = params x precision bytes (QLoRA NF4 about 0.55). KV cache = 2 x KV heads x head dim x tokens x layers (latent for MLA models), reduced by sliding windows. Training adds gradients (2 bytes per trained param), optimizer state (AdamW 8, Lion 4, SGD 4 bytes, a quarter with 8-bit), fp32 master weights for full fine-tune unless pure 16-bit, activations (shrunk by gradient checkpointing, plus attention scores without Flash Attention) and an fp32 logits buffer (smaller with fused kernels). Full fine-tune lands at 16 bytes per param, matching apxml.</div>
       <div><b>Inference</b>Where we ran the exact setup with vLLM (<span id="hw-ni"></span> serving runs), the page uses that run. Otherwise a decode step takes the longer of reading the weights plus every sequence's KV cache at 74.5% of bandwidth (56% for INT4) and its compute (decode tokens at 16% of peak, the prompts feeding them at 58%), plus 1.4 ms per step; tensor parallel adds two all-reduces per layer. First token is 7.5 ms plus the prompt's compute at 58% of peak, attention included. That roofline is then corrected with our vLLM runs on the same GPU (per-token time, first-token time and how first-token time grows with users, fitted only on runs where every user fitted in KV memory). A GPU with no vLLM runs borrows the closest measured GPU's correction and says so. Total throughput counts each user's wait for the first token, as vllm bench serve measures it. A model that fits on one GPU is served by replicas; tensor parallel is used inside a box and pipeline stages only across boxes (not measured). Max users is set by KV memory at 90% of VRAM.</div>
       <div><b>Rates</b>Our invoiced rate where we have one: A100 $1.425 (Gcore commits) and H100 $2.60 (Gcore PAYG). Others use a public on-demand list price: RunPod Secure Cloud (13 Sep 2026), Lambda, or the Vast index. Apple machines are bought, not rented, so they have no hourly rate. GPUs with no rate in these sources show time and speed only. Costs add our 10% overhead and no margin.</div>
@@ -479,6 +479,7 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
 <script src="models.js?v=1790514739"></script>
 <script src="gpus.js?v=1790514739"></script>
 <script src="measured.js?v=1790525390"></script>
+<script src="caps.js?v=1"></script>
 <script src="engine.js?v=1790514739"></script>
 <script>
 const $=id=>document.getElementById(id);
@@ -599,7 +600,8 @@ function chips(){}
 let popHi=-1;
 function fillInput(){$("model").value=S.model==="__c"?"Custom model":(MODELS[S.model]?MODELS[S.model].l:"");}
 (()=>{const t=MEASURED.train||[],f=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};f("hw-nt",t.length);f("hw-ng",new Set(t.map(r=>r.gpu)).size);f("hw-ni",(MEASURED.infer||[]).length);
-  for(const c of [80,90]){f("hw-c"+c,CAP[c].f.toFixed(2));f("hw-v"+c,CAP[c].cov);}})();
+  for(const c of [80,90]){f("hw-c"+c,CAP[c].f.toFixed(2));f("hw-v"+c,CAP[c].cov);}
+  if(window.CAPS){const C=CAPS.coverage;f("hw-vB",`${C.B[90].hit} of ${C.B[90].n}`);f("hw-vA",`${C.A[90].hit} of ${C.A[90].n}`);}})();
 const MSET=new Set([...(MEASURED.train||[]),...(MEASURED.infer||[])].map(r=>r.model));
 function openPop(q){
   q=(q||"").toLowerCase().trim();
@@ -665,7 +667,7 @@ function sideFt(g,m){
     :row("Status",!r.fits?"does not fit":r.why);
   else{$("srows").innerHTML=
     row("Job cost",hasCost?money(r.cost):"n/a","our cost incl. 10% overhead")+
-    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`held for ${CAP[S.cov].cov} held-out runs`:"")+
+    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`x${r.capF.toFixed(2)} for this quote (${r.capKind==="B"?"measured GPU":"estimated GPU"}); held for ${r.capCover} held-out runs like it`:"")+
     row("Cost per 1M tokens",hasCost?money(r.perM):"n/a","training tokens")+
     row("vs fine-tune API",hasCost?pct(less(r.perM,S.api.ft)):"n/a",`our ${hasCost?money(r.perM):"n/a"} vs API $<input id="apift" type="number" min="0" step="0.5" value="${S.api.ft}"> /1M`,"default gpt-4o-mini")+
     marketRow(g)+row("Energy",ok?`${(r.kwh<10?r.kwh.toFixed(2):int(r.kwh))} kWh`:"n/a",r.powerMeasured?"at our measured power draw":"at full GPU power")+

@@ -5,6 +5,7 @@
   const isNode = typeof module !== "undefined" && module.exports;
   const MODELS = isNode ? require("./models.js").MODELS : root.MODELS;
   const GPUS = isNode ? require("./gpus.js").GPUS : root.GPUS;
+  const CAPS = (isNode ? (() => { try { return require("./caps.js"); } catch (e) { return null; } })() : root.CAPS) || null;
   const MEAS = (isNode ? (process.env.ODYN_NO_MEASURED ? null : (() => { try { return require(process.env.ODYN_MEAS_FILE || "./measured.js"); } catch (e) { return null; } })()) : root.MEASURED) || { train: [], infer: [] };
 
   /* calibrated fine-tune fit on our 15 single-GPU runs: tok/s/GPU = exp(level) * N^-P */
@@ -538,6 +539,15 @@
       if (!best || score > best.score) best = { ref: k, curve: c, ratio: Math.exp(lr), common: common.length, score, runs: [] }; }
     return (TR[ck] = best);
   }
+  // per-quote price cap: posterior predictive quantile of actual/estimated cost for this kind of quote (caps.js), else the single conformal cap
+  function capFor(gk, key, m, cov, measuredGpu) {
+    const T = CAPS && CAPS.table, qi = cov === 80 ? 0 : 1, sm = String(m && m.p <= 2 ? 1 : 0);
+    let v = null, kind;
+    if (T && measuredGpu) { v = (T.B[gk] && T.B[gk][key]) || (T.Bnew[gk] && T.Bnew[gk][sm]); kind = "B"; }
+    if (T && !v) { v = T.A[key] || T.Anew[sm]; kind = "A"; }
+    if (!v) return { f: CAP[cov].f, kind: "global", cover: CAP[cov].cov };
+    const c = CAPS.coverage[kind][cov]; return { f: v[qi], kind, cover: `${c.hit}/${c.n}` };
+  }
   const sizeRange = x => x.lo === x.hi ? `at ${+x.lo.toFixed(1)}B` : `at ${+x.lo.toFixed(1)}-${+x.hi.toFixed(1)}B`;
   // Volta and Turing: no BF16 (training runs in FP16) and no Flash Attention 2
   const NO_FA2 = new Set(["v100", "v100-32", "t4"]);
@@ -568,7 +578,8 @@
         const adj = [`from our ${GPUS[ref].name} runs x${ratio.toFixed(2)}: MLPerf Training Llama 2 70B LoRA on 8 GPUs, ${GPUS[gk].sn} ${MLPERF_FT[gk]} min vs ${GPUS[ref].sn} ${MLPERF_FT[ref]} min`, ...rr.adj.filter(a => typeof a === "string")];
         const gbatch = (o.batch || 1) * (o.accum || 1) * n, samples = o.rows * o.epochs, sps = eff * n / avg;
         return { ...r, fits: true, quoted: true, tok: rr.tok * ratio, eff, tag: "X", adj, exactRun: false, jobTok: eff * n, hours, gpuH, cost, amdFt: { ref, ratio },
-          cap: cost == null ? null : cost * CAP[o.cov].f, perM: cost == null ? null : cost / (tt / 1e6), mfu: 6 * bn(m.a) * eff * (o.method === "dpo" ? 2 : 1) / (g.tf * 1e12) * 100,
+          ...(() => { const c = capFor(gk, key, m, o.cov, false); return { capF: c.f, capKind: c.kind, capCover: c.cover, cap: cost == null ? null : cost * c.f }; })(),
+          perM: cost == null ? null : cost / (tt / 1e6), mfu: 6 * bn(m.a) * eff * (o.method === "dpo" ? 2 : 1) / (g.tf * 1e12) * 100,
           kwh: g.tdp * n * hours / 1000, powerMeasured: false, runs: rr.runs, gbatch, steps: Math.ceil(samples / gbatch), sps, stepsPerSec: sps / gbatch }; }
     }
     if (g.ftq === "no" && levelMeasured(gk) == null) return { ...r, fits: true, quoted: false, why: "needs a calibration run" };
@@ -681,7 +692,8 @@
     const sps = eff * n / avg;
     return {
       ...r, fits: true, quoted: true, tok: base, eff, tag, adj, exactRun: !!(dr && dr.exact), jobTok: eff * n, hours, gpuH, cost,
-      cap: cost == null ? null : cost * CAP[o.cov].f, perM: cost == null ? null : cost / (tt / 1e6),
+      ...(() => { const c = capFor(gk, key, m, o.cov, levelMeasured(gk) != null); return { capF: c.f, capKind: c.kind, capCover: c.cover, cap: cost == null ? null : cost * c.f }; })(),
+      perM: cost == null ? null : cost / (tt / 1e6),
       mfu: 6 * bn(m.a) * eff * (o.method === "dpo" ? 2 : 1) / (g.tf * 1e12) * 100, kwh: g.tdp * (powerFrac(gk) || 1) * n * hours / 1000, powerMeasured: powerFrac(gk) != null, runs,
       gbatch, steps: Math.ceil(samples / gbatch), sps, stepsPerSec: sps / gbatch
     };

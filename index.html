@@ -112,7 +112,7 @@ details.how summary::after{content:"+";color:var(--mut)}details.how[open] summar
 .r:last-child{border-bottom:0}
 .r .l{color:var(--mut);font-size:13.5px}.r .l small{display:block;color:var(--dim);font-size:11.5px}
 .r .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
-.r .v small{display:block;color:var(--dim);font-weight:400;font-size:11.5px}
+.r .v small{display:block;color:var(--dim);font-weight:400;font-size:11.5px;white-space:normal;max-width:260px;margin-left:auto}
 .r.adj{flex-direction:column;align-items:stretch;gap:6px}.r.adj ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px}
 .r.adj li{font-size:12.5px;font-weight:500;padding:3px 9px;border:1px solid var(--line);border-radius:999px;overflow-wrap:anywhere;max-width:100%}
 .r.adj li[title]{cursor:help;border-style:dashed}
@@ -307,6 +307,8 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
 .mstick{display:none}
 @media(max-width:1060px){.mstick{display:flex;position:fixed;left:12px;right:12px;bottom:12px;z-index:30;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border:1px solid var(--line2);border-radius:14px;background:var(--panel);box-shadow:0 8px 30px rgba(0,0,0,.35);color:var(--ink);text-decoration:none;font-weight:700;font-variant-numeric:tabular-nums}
 .mstick small{display:block;font-weight:400;font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62vw}.mstick span{font-size:12.5px;color:var(--acc);font-weight:600;white-space:nowrap}body{padding-bottom:84px}}
+
+@media(max-width:640px){.sec .segc{flex-wrap:wrap}.sec .segc button{flex:1 1 40%;min-height:34px}.xtabs{flex-wrap:wrap;row-gap:4px}.f{min-width:0}}
 </style></head><body data-mode="ft">
 <div class="top"><div class="in">
   <div class="brand"><img class="logo" src="odyn-glyph.svg" alt="Odyn"><b>odyn</b><span>Compute Calculator</span></div>
@@ -526,7 +528,9 @@ const ftOpt=()=>({rows:num("rows"),seq:num("seq"),epochs:num("epochs"),method:S.
  flash:S.flash,ckpt:S.ckpt,opt8:S.opt8,fused:S.fused,packing:S.packing,dynpad:S.dynpad,pure16:S.pure16,zero:S.zero,ngpu:S.ngpu||0});
 const infOpt=(C,gk)=>({maxGpus:64,ngpu:S.igpu,pin:num("pin"),pout:num("pout"),C:C||num("conc"),wq:S.wq,kvq:S.kvq,batch:S.ibatch,offload:S.offload});
 const FT=(gk,mk)=>ft(gk,model(mk),mk,ftOpt());
+const FTc=(gk,mk)=>ft(gk,model(mk),mk,{...ftOpt(),ngpu:gk===S.gpu?(S.ngpu||0):0});   /* cards and comparisons: auto count except the selected GPU */
 const INF=(gk,mk,C)=>inf(gk,model(mk),infOpt(C,gk));
+const INFc=(gk,mk)=>inf(gk,model(mk),{...infOpt(null,gk),ngpu:gk===S.gpu?S.igpu:0});
 
 const row=(l,v,ls,vs,cls)=>`<div class="r"><span class="l">${l}${ls?`<small>${ls}</small>`:""}</span><span class="v ${cls||""}">${v}${vs?`<small>${vs}</small>`:""}</span></div>`;
 function pct(p){return p==null?"n/a":Math.abs(p)<1?"on par":`<span class="${p>=0?"good":"warn"}">${Math.round(Math.abs(p))}% ${p>=0?"cheaper":"dearer"}</span>`;}
@@ -569,7 +573,7 @@ function toggles(){const base=PRESETS[S.basePreset]||PRESETS.measured;
 const inFilt=(k,f)=>f==="all"||(k!=="custom"&&(f==="fleet"?GPUS[k].fleet:GPUS[k].tier===f));
 const vis=()=>Object.keys(GPUS).filter(k=>inFilt(k,S.gf));
 function rankGpus(){const isFt=S.mode==="ft",items=[];
-  for(const k of vis()){const g=GPUS[k],r=isFt?FT(k,S.model):INF(k,S.model);let grp,key;
+  for(const k of vis()){const g=GPUS[k],r=isFt?FTc(k,S.model):INFc(k,S.model);let grp,key;
     if(!r.fits){grp=3;key=0;}else if(isFt&&!r.quoted){grp=2;key=0;}
     else if(isFt){if(r.cost==null){grp=1;key=r.hours;}else{grp=0;key=r.cost;}}
     else{if(r.perM==null){grp=1;key=-r.agg;}else{grp=0;key=r.perM;}}
@@ -651,10 +655,11 @@ function renderMain(){
 
 function sideFt(g,m){
   const r=FT(S.gpu,S.model),ok=r.fits&&r.quoted,hasCost=ok&&r.cost!=null;
-  const all=vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost),fb=all.filter(x=>GPUS[x[0]].fleet);
-  if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(!r.quoted)statusEl("NEEDS CALIBRATION","st-warn");else if(r.n>1)statusEl(S.ngpu?`RUNS ON ${r.n} GPUS${S.ngpu>r.n?" (BOX MAX)":""}`:`NEEDS ${r.n} GPUS`,"st-multi");else statusEl("FITS ON 1 GPU","st-ok");
+  const all=vis().map(k=>[k,FTc(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost),fb=all.filter(x=>GPUS[x[0]].fleet);
+  if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(!r.quoted)statusEl("NEEDS CALIBRATION","st-warn");else if(r.n>1){const au=S.ngpu?ft(S.gpu,m,S.model,{...ftOpt(),ngpu:0}):null;
+    statusEl(S.ngpu?(au&&au.fits&&au.n<r.n?`${r.n} GPUS, YOUR CHOICE · ${au.n} ${au.n>1?"FIT":"FITS"}`:`${r.n} GPUS, YOUR CHOICE${S.ngpu>r.n?" (BOX MAX)":""}`):`NEEDS ${r.n} GPUS`,"st-multi");}else statusEl("FITS ON 1 GPU","st-ok");
   $("big").textContent=hasCost?money(r.cost):ok?dur(r.hours):"n/a";
-  $("under").textContent=hasCost?`${dur(r.hours)} on ${r.n}x ${g.name}`:ok?`${dur(r.hours)} on ${r.n}x ${g.name} · ${g.tier==="custom"?"add a rate to see cost":g.unified?"not for rent, no cost":"no rate on file"}`:!r.fits?(/^(needs|more than|does not|sequences)/.test(r.why||"")?r.why.replace(/^more than/,"needs more than"):"needs "+r.why):r.why;
+  $("under").textContent=hasCost?`${dur(r.hours)} on ${r.n}x ${g.name}`+(S.ngpu&&r.n>1?(()=>{const au=ft(S.gpu,m,S.model,{...ftOpt(),ngpu:0});return au.fits&&au.quoted&&au.n<r.n?` · auto: ${au.n} GPU${au.n>1?"s":""}, ${money(au.cost)}, ${dur(au.hours)}`:"";})():""):ok?`${dur(r.hours)} on ${r.n}x ${g.name} · ${g.tier==="custom"?"add a rate to see cost":g.unified?"not for rent, no cost":"no rate on file"}`:!r.fits?(/^(needs|more than|does not|sequences)/.test(r.why||"")?r.why.replace(/^more than/,"needs more than"):"needs "+r.why):r.why;
   $("chip").hidden=!hasCost;if(hasCost)$("chip").innerHTML=`capped at <b>${money(r.cap)}</b> (${S.cov}%)`;
   $("mini").innerHTML=mini([[ok?dur(r.hours):"n/a","time"],[ok?fmtK(r.jobTok)+" tok/s":"n/a","throughput"],[ok?Math.round(r.mfu)+"%":"n/a","GPU use"]]);
   $("ftsum").innerHTML=`<b>${r.tt>=1e9?(r.tt/1e9).toFixed(2)+"B":(r.tt/1e6).toFixed(1)+"M"}</b><small>= ${int(num("rows"))} x ${int(num("seq"))} x ${int(num("epochs"))} epoch${num("epochs")>1?"s":""}</small>`;
@@ -667,7 +672,7 @@ function sideFt(g,m){
     :row("Status",!r.fits?"does not fit":r.why);
   else{$("srows").innerHTML=
     row("Job cost",hasCost?money(r.cost):"n/a","our cost incl. 10% overhead")+
-    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`x${r.capF.toFixed(2)} for this quote (${r.capKind==="B"?"measured GPU":"estimated GPU"}); held for ${r.capCover} held-out runs like it`:"")+
+    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`x${r.capF.toFixed(2)} (${r.capKind==="B"?"measured GPU":"estimated GPU"}); held for ${r.capCover} similar held-out runs`:"")+
     row("Cost per 1M tokens",hasCost?money(r.perM):"n/a","training tokens")+
     row("vs fine-tune API",hasCost?pct(less(r.perM,S.api.ft)):"n/a",`our ${hasCost?money(r.perM):"n/a"} vs API $<input id="apift" type="number" min="0" step="0.5" value="${S.api.ft}"> /1M`,"default gpt-4o-mini")+
     marketRow(g)+row("Energy",ok?`${(r.kwh<10?r.kwh.toFixed(2):int(r.kwh))} kWh`:"n/a",r.powerMeasured?"at our measured power draw":"at full GPU power")+
@@ -724,14 +729,14 @@ function explore(){
   $("p-chart").hidden=!["bands","frontier","curve"].includes(S.xt);$("p-matrix").hidden=S.xt!=="matrix";$("p-sim").hidden=S.xt!=="sim";$("mview").hidden=S.xt!=="matrix";
   const m=model(S.model),isFt=S.mode==="ft";$("cv").parentElement.style.height="340px";
   if(S.xt==="bands"){$("xh").textContent=`Estimate and price cap: ${{dc:"data centre GPUs",ws:"workstation GPUs",mac:"Apple machines",fleet:"our fleet",all:"every GPU"}[S.gf]} with a rate`;
-    const rows=vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost);
+    const rows=vis().map(k=>[k,FTc(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost);
     $("cv").parentElement.style.height=Math.max(160,rows.length*40+44)+"px";
     bands(rows.map(([k,x])=>({k,lo:x.cost,hi:x.cap,tag:x.tag,n:x.n})));
     $("leg").innerHTML=`<span><span class="sw" style="background:var(--M)"></span>measured</span><span><span class="sw" style="background:var(--P)"></span>predicted</span><span><span class="sw" style="background:var(--X)"></span>from specs</span><span><span class="sw sq" style="background:rgba(41,180,115,.4)"></span>up to the ${S.cov}% cap</span>`;
     $("cnote").textContent=`${m.l}, ${(num("rows")*num("seq")*num("epochs")/1e6).toFixed(2)}M training tokens. x2, x4 = GPUs needed.`;}
   if(S.xt==="frontier"){$("xh").textContent="Cost per 1M tokens vs throughput";
-    const pts=isFt?vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).map(([k,x])=>({k,x:x.jobTok,y:x.perM,tag:x.tag,n:x.n}))
-      :vis().map(k=>[k,INF(k,S.model)]).filter(x=>x[1].fits&&x[1].perM!=null).map(([k,x])=>({k,x:x.agg,y:x.perM,tag:x.exact?"M":x.calFrom===k?"P":"X",n:x.N}));
+    const pts=isFt?vis().map(k=>[k,FTc(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).map(([k,x])=>({k,x:x.jobTok,y:x.perM,tag:x.tag,n:x.n}))
+      :vis().map(k=>[k,INFc(k,S.model)]).filter(x=>x[1].fits&&x[1].perM!=null).map(([k,x])=>({k,x:x.agg,y:x.perM,tag:x.exact?"M":x.calFrom===k?"P":"X",n:x.N}));
     frontier(pts,isFt?"training tok/s":"output tok/s");
     $("leg").innerHTML=(isFt?`<span><span class="sw" style="background:var(--M)"></span>measured</span><span><span class="sw" style="background:var(--P)"></span>predicted</span>`:"")+`<span><span class="sw" style="background:var(--X)"></span>${isFt?"from specs":"estimate"}</span><span>ring = cheapest on our fleet</span>`;
     $("cnote").textContent=`Lower and further right is better. ${m.l}${isFt?"":`, ${num("conc")} users`}.`;}
@@ -792,7 +797,7 @@ const MROWS=["llama-3.2-1b","llama-3.2-3b","qwen3-8b","llama-3.1-8b","gpt-oss-20
 function matrix(){const isFt=S.mode==="ft",allG=vis(),needRate=S.mv==="cost",gks=allG.filter(gk=>(!needRate||GPUS[gk].rate!=null)&&MROWS.some(mk=>{const r=isFt?FT(gk,mk):INF(gk,mk);return r.fits&&(!isFt||r.quoted);})),hid=allG.length-gks.length;const views=isFt?[["cost","Cost"],["time","Time"]]:[["cost","$ per 1M"],["tps","tok/s"]];if(!views.some(v=>v[0]===S.mv))S.mv="cost";
   $("mview").innerHTML=views.map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${k===S.mv}">${l}</button>`).join("");
   let h=`<thead><tr><th>Model</th>${gks.map(g=>`<th>${short(g)}<small>${GPUS[g].vram} GB · ${GPUS[g].rate==null?(GPUS[g].unified?"not for rent":"no rate"):"$"+GPUS[g].rate.toFixed(2)}</small></th>`).join("")}</tr></thead><tbody>`;
-  for(const mk of MROWS){const M=MODELS[mk];const cells=gks.map(gk=>{const r=isFt?FT(gk,mk):INF(gk,mk);const okc=r.fits&&(isFt?r.quoted:true);return{gk,r,val:!okc?null:isFt?(S.mv==="cost"?r.cost:r.hours):(S.mv==="cost"?r.perM:r.agg)};});
+  for(const mk of MROWS){const M=MODELS[mk];const cells=gks.map(gk=>{const r=isFt?FTc(gk,mk):INFc(gk,mk);const okc=r.fits&&(isFt?r.quoted:true);return{gk,r,val:!okc?null:isFt?(S.mv==="cost"?r.cost:r.hours):(S.mv==="cost"?r.perM:r.agg)};});
     const fv=cells.filter(c=>c.val!=null&&GPUS[c.gk].fleet).map(c=>c.val),lo=fv.length?(S.mv==="tps"?Math.max(...fv):Math.min(...fv)):null;
     h+=`<tr><td>${M.l}${M.moe?'<span class="moe">MoE</span>':""}</td>`;
     for(const c of cells){const cur=c.gk===S.gpu&&mk===S.model?" cur":"",d=`data-g="${c.gk}" data-m="${mk}"`;

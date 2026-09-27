@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Odyn Compute Estimator: method and accuracy</title>
+<link rel="icon" href="favicon-dark.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0D0F12;--panel:#101317;--panel2:#14171C;--line:#232830;--ink:#F0F1F3;--mut:#9aa1ab;--dim:#5B616B;--acc:#29B473}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f6f7f8;--panel:#fff;--panel2:#f1f3f5;--line:#dde1e6;--ink:#101317;--mut:#4a5058;--dim:#7a818b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 Inter,system-ui,sans-serif}
+.w{max-width:980px;margin:0 auto;padding:32px 16px 80px}h1{font-size:28px;margin:0 0 6px}h2{font-size:19px;margin:40px 0 10px}
+p,li{color:var(--mut)}b{color:var(--ink)}.lede{font-size:16.5px}a{color:var(--acc)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:22px 0}
+.k{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}.k b{display:block;font-size:24px}.k span{color:var(--mut);font-size:13px}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px;margin:10px 0}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}th{background:var(--panel2);color:var(--mut);font-weight:600;font-size:12.5px}
+td small{display:block;color:var(--dim)}.pick{font-size:11px;color:var(--acc);border:1px solid var(--acc);border-radius:999px;padding:0 6px;margin-left:6px}
+.scroll{overflow-x:auto}code{font-family:"JetBrains Mono",monospace;font-size:13px}.note{font-size:13.5px;color:var(--dim)}
+ol li,ul li{margin:4px 0}
+</style></head><body><div class="w">
+<p><a href="index.html">Calculator</a></p>
+<h1>How the estimator works, and how accurate it is</h1>
+<p class="lede">Fine-tuning and inference cost estimates built on our own measurements: 155 fine-tuning runs and 62 serving runs on 6 GPU types (A100, H100, H200, B200, L40S, RTX 4090), 1 to 8 GPUs, 1.7B to 70B models. Every accuracy number below is on held-out data the model did not see.</p>
+<div class="kpis">
+<div class="k"><b>9.9%</b><span>median error on a GPU never used for training (MAPE 12.2%)</span></div>
+<div class="k"><b>3.7%</b><span>median error on an unseen setup of a known GPU</span></div>
+<div class="k"><b>x1.195</b><span>90% price cap for measured GPUs; x1.224 for new hardware, tested at 90.3% coverage</span></div>
+<div class="k"><b>51.8%</b><span>error of the previous calculator on the same runs</span></div>
+</div>
+
+<p class="note"><b>Status.</b> The live calculator uses our measured runs directly where the setup matches, plus laws fitted on them (step size, multi-GPU scaling, method and setting factors, per-GPU serving corrections). The profiler-informed model below was evaluated offline on the same runs; it is the next version of the estimator, not yet what the calculator runs.</p>
+<h2>The approach</h2>
+<ol>
+<li><b>Measure the hardware once, cheaply.</b> A 10-minute profiler measures each GPU's real matrix-multiply speed, memory bandwidth, attention speed and GPU-to-GPU bandwidth. Datasheets overstate what GPUs deliver, unevenly: the L40S reaches 54% of its datasheet matmul rate, the RTX 4090 95%.</li>
+<li><b>Physics first.</b> Speed starts from a roofline: the compute a training step needs (6 x active parameters per token) against the GPU's measured throughput.</li>
+<li><b>Learn the efficiency, not the answer.</b> A regression learns how far real runs fall short of the roofline from the setup: tokens per step, model size, method (LoRA, QLoRA, DPO, full), checkpointing, attention kernel, optimizer, MoE, DDP or FSDP across GPUs.</li>
+<li><b>Correct what is left with a Gaussian process.</b> It captures interactions the regression misses and gives each estimate an uncertainty.</li>
+<li><b>Guarantee the price.</b> A conformal bound on held-out errors sets the price cap, tested by calibrating without the GPU being checked.</li>
+</ol>
+<p>This follows the operator-profiling idea of Vidur (MLSys 2024) and the cross-GPU transfer idea of Habitat (USENIX ATC 2021), extended to fine-tuning, which neither covers, and tied to a priced guarantee.</p>
+
+<h2>Fine-tuning speed: held-out accuracy</h2>
+<p>Mean absolute percentage error of predicted vs measured tokens per second per GPU. Unseen GPU: every run on one GPU is hidden, and the model sees only that GPU's profiler numbers. Unseen setup: repeats of the same setup are hidden together, so no copy leaks into training.</p>
+<div class="scroll"><table class=""><thead><tr><th>Model</th><th>Unseen GPU</th><th>Unseen setup</th><th>Unseen model</th></tr></thead><tbody><tr><td>Previous calculator</td><td>51.8% <small>median 22.7%</small></td><td>51.8% <small>median 22.7%</small></td><td>51.8% <small>median 22.7%</small></td></tr><tr><td>Physics regression</td><td>14.1% <small>median 11.6%</small></td><td>10.3% <small>median 8.1%</small></td><td>25.6% <small>median 11.4%</small></td></tr><tr><td>Roofline + learned efficiency</td><td>13.3% <small>median 11.4%</small></td><td>10.2% <small>median 7.9%</small></td><td>31.1% <small>median 14.7%</small></td></tr><tr><td>Roofline + efficiency + GP residual <b class=pick>chosen</b></td><td>12.2% <small>median 9.9%</small></td><td>7.0% <small>median 3.7%</small></td><td>30.6% <small>median 13.6%</small></td></tr><tr><td>Roofline + efficiency + boosted residual</td><td>15.1% <small>median 12.9%</small></td><td>7.0% <small>median 5.1%</small></td><td>30.2% <small>median 13.2%</small></td></tr><tr><td>Boosted trees, no physics</td><td>21.1% <small>median 12.5%</small></td><td>8.8% <small>median 6.5%</small></td><td>39.3% <small>median 35.1%</small></td></tr></tbody></table></div>
+<p class="note">The previous calculator is a fixed formula, not refitted, so it scores the same in every column. The chosen model is best on unseen GPUs and unseen setups; on unseen models the plain physics regression is better (25.6% against 30.6%), so for model families we have not measured the physics regression is the better choice.</p>
+<p><b>Why profiler features matter.</b> The same model with datasheet specs instead of measured hardware:</p>
+<div class="scroll"><table class=""><thead><tr><th>Model</th><th>Unseen GPU, datasheet specs</th><th>Unseen GPU, profiler-measured</th></tr></thead><tbody><tr><td>Roofline + efficiency + GP residual</td><td>24.0% <small>median 17.2%</small></td><td>12.2% <small>median 9.9%</small></td></tr></tbody></table></div>
+
+<h2>Measured hardware vs datasheet</h2>
+<div class="scroll"><table class=""><thead><tr><th>GPU</th><th>Datasheet BF16 TFLOPS</th><th>Measured matmul TFLOPS</th><th>Share</th><th>Datasheet TB/s</th><th>Measured TB/s</th><th>Share</th></tr></thead><tbody><tr><td>A100</td><td>312</td><td>250</td><td>80%</td><td>2.04</td><td>1.75</td><td>86%</td></tr><tr><td>H100</td><td>989</td><td>721</td><td>73%</td><td>3.35</td><td>3.00</td><td>90%</td></tr><tr><td>H200</td><td>989</td><td>680</td><td>69%</td><td>4.80</td><td>4.23</td><td>88%</td></tr><tr><td>B200</td><td>2250</td><td>1378</td><td>61%</td><td>8.00</td><td>6.42</td><td>80%</td></tr><tr><td>L40S</td><td>362</td><td>196</td><td>54%</td><td>0.86</td><td>0.65</td><td>75%</td></tr><tr><td>RTX4090</td><td>165</td><td>157</td><td>95%</td><td>1.01</td><td>0.92</td><td>91%</td></tr></tbody></table></div>
+
+<h2>Serving: held-out accuracy on unseen GPUs</h2>
+<div class="scroll"><table class=""><thead><tr><th>Metric</th><th>Model</th><th>Error</th><th>Bias</th></tr></thead><tbody><tr><td>Time per output token</td><td>physics only (datasheet)</td><td>15.6% <small>median 11.6%</small></td><td>+9%</td></tr><tr><td>Time per output token</td><td>physics + learned correction</td><td>15.6% <small>median 12.5%</small></td><td>+3%</td></tr><tr><td>Time per output token</td><td>physics + correction, measured hardware</td><td>15.5% <small>median 12.2%</small></td><td>+4%</td></tr><tr><td>Time per output token</td><td>physics + correction + GP, measured hardware</td><td>16.7% <small>median 13.4%</small></td><td>+2%</td></tr><tr><td>Output throughput</td><td>physics only (datasheet)</td><td>17.8% <small>median 11.9%</small></td><td>+4%</td></tr><tr><td>Output throughput</td><td>physics + learned correction</td><td>13.6% <small>median 9.6%</small></td><td>-0%</td></tr><tr><td>Output throughput</td><td>physics + correction, measured hardware</td><td>14.0% <small>median 10.4%</small></td><td>-1%</td></tr><tr><td>Output throughput</td><td>physics + correction + GP, measured hardware</td><td>14.1% <small>median 11.6%</small></td><td>+0%</td></tr><tr><td>First-token time</td><td>physics only (datasheet)</td><td>63.5% <small>median 73.9%</small></td><td>-45%</td></tr><tr><td>First-token time</td><td>physics + learned correction</td><td>68.4% <small>median 25.6%</small></td><td>+43%</td></tr><tr><td>First-token time</td><td>physics + correction, measured hardware</td><td>68.3% <small>median 22.6%</small></td><td>+44%</td></tr><tr><td>First-token time</td><td>physics + correction + GP, measured hardware</td><td>72.8% <small>median 28.4%</small></td><td>+46%</td></tr></tbody></table></div>
+<p>Per-token time is predicted well by physics alone, so no learned model is used for it. Throughput improves with a learned correction. <b>First-token time under load is not predictable from these features:</b> it is dominated by queueing once users exceed capacity. That needs a request-level scheduler simulation (the Vidur component), which is the next piece of work.</p>
+
+<h2>Sanity checks we ran</h2>
+<ul>
+<li>Profiler pieces add up: one layer's matrix multiplies plus attention match the measured whole-layer time within 0 to 16% on every GPU (the rest is normalisation and element-wise work).</li>
+<li>Measured GPU-to-GPU bandwidth on 8x H100 (362 GB/s) matches the value the traffic model uses (360 GB/s).</li>
+<li>Learned effects checked against physics:</li>
+</ul>
+<div class="scroll"><table class=""><thead><tr><th>Effect on log speed</th><th>Fitted</th><th>Physically sensible?</th></tr></thead><tbody><tr><td>Model size (log)</td><td>-0.72</td><td>yes, matches our earlier size law (-0.73)</td></tr><tr><td>QLoRA</td><td>-0.76</td><td>yes, about 2x slower</td></tr><tr><td>Gradient checkpointing off</td><td>+0.34</td><td>yes, about 1.4x faster</td></tr><tr><td>Eager attention (no Flash)</td><td>-0.39</td><td>yes, about 0.68x</td></tr><tr><td>Full fine-tune</td><td>+0.26</td><td>no: confounded, full FT only on the two smallest models</td></tr><tr><td>DDP per GPU doubling</td><td>+0.03</td><td>no: confounded with host (8-GPU host faster)</td></tr></tbody></table></div>
+
+<h2>Known limits</h2>
+<ul>
+<li>Unseen models are the weak case (30.6% MAPE): one MoE model, and the smallest models were only run with full fine-tuning. More model families are the fix.</li>
+<li>No AMD or Apple training runs yet; MI300X had no capacity during this campaign.</li>
+<li>Speeds are measured on RunPod hosts; the same GPU varies about 10% between hosts, which the price cap has to absorb.</li>
+<li>Startup (container, model download) is measured separately: 38 s to 9 min to reach a ready pod, and about 50 s to download a 16 GB model.</li>
+</ul>
+<p class="note">Data: odyn-prof benchmark (transformers + PEFT training on each model's real config; vLLM 0.30 serving with dummy weights), every row with run id, versions and 95% intervals. Evaluation code: eval_train.py, eval_serve_cap.py.</p>
+</div></body></html>

@@ -1,0 +1,892 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Odyn Compute Calculator</title>
+<link rel="icon" type="image/png" href="favicon-light.png" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/png" href="favicon-dark.png" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{color-scheme:dark;
+ --bg:#0D0F12;--panel:#101317;--panel2:#14171C;--line:#232830;--line2:#2C323C;
+ --ink:#F0F1F3;--mut:#9CA3AE;--dim:#5B616B;
+ --acc:#29B473;--accd:#249351;--accg:rgba(41,180,115,.12);
+ --warn:#f2b13c;--bad:#ff6b6b;--vio:#a78bfa;--blue:#5cc8ff;
+ --M:#29B473;--P:#f2b13c;--X:#7d8794;
+ --disp:'Manrope',system-ui,sans-serif;--body:'Inter',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--bg)}
+body{color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:5;background:rgba(13,15,18,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.top .in{max-width:1480px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--disp)}
+.logo{width:26px;height:26px;display:block}
+.brand b{font-weight:800;font-size:18px}.brand span{color:var(--mut);font-weight:600}
+
+.page{max-width:1480px;margin:0 auto;padding:24px 20px 40px;display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:24px;align-items:start}
+@media(max-width:1060px){.page{grid-template-columns:minmax(0,1fr)}.side{position:static!important}}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px}
+.pad{padding:24px}
+h1{font-family:var(--disp);font-size:26px;font-weight:800;letter-spacing:-.01em}
+.lede{color:var(--mut);margin-top:4px}
+
+/* mode tabs */
+.tabs{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.tabs button{flex:1;background:none;border:0;color:var(--mut);font:600 14px var(--body);padding:9px 18px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected="true"]{background:var(--line2);color:var(--ink)}
+.tabs.big{margin:20px 0 4px}
+
+/* form */
+.sec{padding-top:22px;margin-top:22px;border-top:1px solid var(--line)}
+.sec h2{font-size:13px;font-weight:600;color:var(--mut);margin-bottom:14px}
+.f{display:flex;flex-direction:column;gap:6px}
+.f label{font-weight:600;font-size:14px}
+.f .hint{color:var(--dim);font-size:12.5px;margin-top:-3px}
+.f .meta{color:var(--mut);font-size:12.5px;font-family:var(--mono)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+select,input[type=number],input[type=text]{width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--line2);border-radius:10px;padding:10px 12px;font:14px var(--body);font-variant-numeric:tabular-nums}
+select:focus,input:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{background:var(--panel2);color:var(--mut);border:1px solid var(--line2);border-radius:9px;padding:8px 14px;font:500 13px var(--body);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accg);color:var(--acc);border-color:var(--accd)}
+.seg.sm button{padding:4px 10px;font-size:12px}
+.sumline{margin-top:14px;padding:12px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
+.sumline b{color:var(--ink);font-weight:600}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.rowr{display:flex;align-items:center;gap:12px}.rowr .inp input{width:100%}
+[hidden]{display:none!important}
+
+/* explore */
+.explore{margin-top:24px}
+.explore .head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:18px 24px 0}
+.explore .head h3{font-family:var(--disp);font-size:17px;font-weight:700}
+.xtabs{display:flex;gap:4px;border-bottom:1px solid var(--line);padding:0 24px;margin-top:14px;overflow-x:auto}
+.xtabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mut);font:500 13.5px var(--body);padding:10px 12px;cursor:pointer;white-space:nowrap}
+.xtabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--acc)}
+.panel{padding:18px 24px 22px}
+.cv{position:relative;height:340px}.cv canvas{position:absolute;inset:0;width:100%;height:100%}
+.cap-note{color:var(--dim);font-size:12.5px;margin-top:10px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--mut)}
+.legend span{display:inline-flex;align-items:center;gap:6px}.sw{width:9px;height:9px;border-radius:50%}.sq{border-radius:2px}
+.tblscroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table.m{border-collapse:collapse;width:100%;font-size:13px}
+.m th,.m td{padding:9px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+.m th:first-child,.m td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1}
+.m thead th{background:var(--panel2);color:var(--mut);font-weight:500;font-size:12px}
+.m thead th small{display:block;color:var(--dim);font-size:11px;font-weight:400}
+.m tbody td{font-variant-numeric:tabular-nums;cursor:pointer}.m tbody td:first-child{cursor:default}
+.m tbody tr:hover td{background:var(--panel2)}
+.m td.nf{color:var(--dim)}.m td.cur{outline:2px solid var(--acc);outline-offset:-2px}.m td.lo{color:var(--acc);font-weight:600}
+.t{font-size:10px;margin-left:5px;font-family:var(--mono)}.t-M{color:var(--M)}.t-P{color:var(--P)}.t-X{color:var(--X)}
+.xn{font-size:10.5px;color:var(--vio);margin-left:4px}
+.moe{font-size:10px;color:var(--blue);border:1px solid #2a3a52;border-radius:4px;padding:0 4px;margin-left:6px}
+#simt{min-height:150px;font-size:14.5px;line-height:1.7;white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px 18px;color:var(--ink)}
+.simbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;color:var(--mut);font-size:13px}
+.btn{background:var(--acc);color:#04120c;border:0;border-radius:9px;padding:8px 16px;font:600 13px var(--body);cursor:pointer}
+
+details.how{margin-top:24px}
+details.how summary{cursor:pointer;padding:18px 24px;font-family:var(--disp);font-weight:700;font-size:15px;list-style:none;display:flex;justify-content:space-between}
+details.how summary::after{content:"+";color:var(--mut)}details.how[open] summary::after{content:"-"}
+.howbody{padding:0 24px 22px;display:grid;grid-template-columns:1fr 1fr;gap:18px 28px;color:var(--mut);font-size:13px;line-height:1.65}
+@media(max-width:760px){.howbody{grid-template-columns:1fr}}
+.howbody b{display:block;color:var(--ink);font-family:var(--disp);margin-bottom:2px}
+
+/* side */
+.side{position:sticky;top:76px;display:flex;flex-direction:column;gap:16px}
+.status{display:inline-flex;align-self:center;align-items:center;gap:7px;padding:5px 14px;border-radius:999px;font-weight:700;font-size:13px;letter-spacing:.02em}
+.st-ok{background:rgba(41,180,115,.14);color:var(--acc)}.st-multi{background:rgba(167,139,250,.14);color:var(--vio)}
+.st-warn{background:rgba(242,177,60,.14);color:var(--warn)}.st-bad{background:rgba(255,107,107,.14);color:var(--bad)}
+.hero{text-align:center;padding:22px 22px 18px;display:flex;flex-direction:column;gap:6px}
+.hero .big{font-family:var(--disp);font-size:44px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.hero .under{color:var(--mut);font-size:13px}
+.chip{align-self:center;display:inline-flex;gap:6px;border:1px solid var(--accd);color:var(--acc);border-radius:999px;padding:3px 11px;font-size:12.5px;margin-top:4px}
+.chip b{color:var(--ink)}
+.stabs{margin:0 22px}
+.rows{padding:6px 22px 18px}
+.r{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.r:last-child{border-bottom:0}
+.r .l{color:var(--mut);font-size:13.5px}.r .l small{display:block;color:var(--dim);font-size:11.5px}
+.r .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.r .v small{display:block;color:var(--dim);font-weight:400;font-size:11.5px}
+.good{color:var(--acc)}.warn{color:var(--warn)}
+.r input{width:64px;padding:3px 6px;font-size:12.5px;border-radius:6px;display:inline-block}
+.mem{padding:20px 22px}
+.mem h4{font-family:var(--disp);font-size:15px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:baseline}
+.mem h4 span{color:var(--mut);font:500 13px var(--body)}
+.bar{display:flex;height:22px;border-radius:7px;overflow:hidden;background:var(--panel2)}
+.bar i{display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;font-weight:600;color:#06120d;overflow:hidden;white-space:nowrap}
+.mcards{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-top:16px}
+.mc{border-bottom:2px solid;padding-bottom:6px}
+.mc .n{color:var(--mut);font-size:12px}.mc .g{display:flex;justify-content:space-between;font-weight:600;font-variant-numeric:tabular-nums}
+.mc .g span{font-weight:500}
+.srcnote{color:var(--dim);font-size:12px;padding:0 22px 18px;line-height:1.55}
+
+/* polish */
+body{background:radial-gradient(1200px 500px at 20% -10%,rgba(41,180,115,.07),transparent 60%),radial-gradient(900px 400px at 100% 0,rgba(92,200,255,.05),transparent 60%),var(--bg);background-attachment:fixed}
+.card{box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 30px rgba(0,0,0,.25)}
+.fhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.pill{font-size:12px;font-weight:600;padding:5px 12px;border-radius:999px;border:1px solid var(--line2);color:var(--mut);white-space:nowrap}
+.pill.cal{color:var(--acc);border-color:var(--accd);background:var(--accg)}.pill.est{color:var(--blue);border-color:#2b6f9c;background:rgba(92,200,255,.08)}
+.shead{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.shead h2{margin:0;font-family:var(--disp);font-size:15px;font-weight:700;color:var(--ink)}
+.step{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;background:var(--line2);color:var(--mut)}
+.shint{margin-left:auto;color:var(--dim);font-size:12.5px;font-family:var(--mono)}
+.mrow{display:grid;grid-template-columns:minmax(220px,340px) 1fr;gap:14px;align-items:center}
+@media(max-width:760px){.mrow{grid-template-columns:1fr}}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{background:transparent;border:1px solid var(--line2);color:var(--mut);border-radius:999px;padding:5px 11px;font:500 12.5px var(--body);cursor:pointer}
+.chips button:hover{color:var(--ink);border-color:#4a5160}
+.chips button[aria-pressed="true"]{color:var(--acc);border-color:var(--accd);background:var(--accg)}
+.gpus{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+.gcard{position:relative;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 13px;cursor:pointer;color:var(--ink);font:inherit;display:flex;flex-direction:column;gap:4px;transition:border-color .12s,transform .12s}
+.gcard:hover{border-color:#4a5160;transform:translateY(-1px)}
+.gcard.sel{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset,0 0 24px rgba(41,180,115,.12)}
+.gcard.off{opacity:.55}
+.gt{display:flex;justify-content:space-between;align-items:center;gap:6px}.gt b{font-family:var(--disp);font-size:14.5px}
+.gs{color:var(--dim);font-size:12px}
+.gr{margin-top:4px;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}.gr small{color:var(--mut);font-weight:500;font-size:12px;margin-left:4px}
+.gr.na{color:var(--dim);font-weight:500;font-size:13px}
+.tag{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.tag.fleet{color:var(--acc);background:var(--accg)}.tag.prov{color:var(--warn);background:rgba(242,177,60,.1)}.tag.mkt{color:var(--mut);background:var(--line2)}.tag.none{color:var(--dim);border:1px solid var(--line2)}
+.best{position:absolute;top:-9px;right:10px;background:var(--acc);color:#04120c;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px}
+.grid4{display:grid;grid-template-columns:repeat(3,1fr) 1.2fr;gap:14px}
+@media(max-width:900px){.grid4{grid-template-columns:1fr 1fr}}
+.inp{position:relative}.inp input{padding-right:52px}
+.suf{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--dim);font-size:12.5px;pointer-events:none}
+.seg.fill{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}.seg.fill button{padding:10px 8px}
+.vpill{margin-left:8px;font-size:12px;color:var(--acc);background:var(--accg);border-radius:999px;padding:1px 9px;font-weight:600}
+.ticks{position:relative;height:16px;color:var(--dim);font-size:11px;margin:0 160px 0 8px}.ticks span{position:absolute;transform:translateX(-50%)}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:14px}
+.mini div{padding:12px 10px;text-align:center}.mini div+div{border-left:1px solid var(--line)}
+.mini b{display:block;font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}.mini span{color:var(--dim);font-size:11.5px}
+.memwrap{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:center}
+.donut{width:120px;height:120px;border-radius:50%;display:grid;place-items:center}
+.donut>div{width:88px;height:88px;border-radius:50%;background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.donut b{font-size:20px;font-weight:800;font-family:var(--disp)}.donut span{color:var(--dim);font-size:11px}
+.mleg{display:flex;flex-direction:column;gap:9px}
+.ml{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;font-size:13px}.ml i{width:10px;height:10px;border-radius:3px}
+.ml .n{color:var(--mut)}.ml .g{font-weight:600;font-variant-numeric:tabular-nums}.ml .g small{color:var(--dim);font-weight:400;margin-left:6px}
+/* searchable model picker */
+.combo{position:relative;max-width:560px}
+.combo input{width:100%;padding:13px 38px 13px 14px;font-size:15px;cursor:pointer}
+.cx{position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none;font-size:13px}
+.combo input:focus{cursor:text}
+.mlabel{font-size:11px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.04em;align-self:center;margin-right:2px}
+.pop{position:absolute;z-index:20;top:calc(100% + 6px);left:0;right:0;max-height:460px;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.5);padding:6px}
+.pop[hidden]{display:none}
+.pop .og{color:var(--dim);font-size:11px;font-weight:600;padding:8px 10px 4px;text-transform:uppercase;letter-spacing:.04em}
+.pop button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;background:none;border:0;color:var(--ink);padding:11px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:14px}
+.pop button:hover,.pop button.hi{background:var(--panel2)}
+.pop button small{color:var(--dim);font-family:var(--mono);white-space:nowrap}
+.pop .moe{margin-left:6px}
+.cfgtoggle{background:none;border:0;color:var(--mut);font:600 13px var(--body);cursor:pointer;display:flex;align-items:center;gap:6px;padding:0}
+.cfgtoggle::before{content:"▸";transition:transform .15s;color:var(--dim)}
+.cfgtoggle[aria-expanded="true"]::before{transform:rotate(90deg)}
+.cfg{margin-top:14px}
+.chk{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--mut);cursor:pointer;padding:8px 0}
+.chk input{width:auto;accent-color:var(--acc)}
+.numchip{display:flex;gap:6px}.numchip button{flex:1;background:var(--panel2);color:var(--mut);border:1px solid var(--line2);border-radius:8px;padding:8px 0;font:500 13px var(--body);cursor:pointer}
+.numchip button[aria-pressed="true"]{background:var(--accg);color:var(--acc);border-color:var(--accd)}
+.toggles{display:grid;grid-template-columns:repeat(4,1fr);gap:4px 16px;margin-top:16px}
+@media(max-width:900px){.toggles{grid-template-columns:1fr 1fr}}
+.toggles label{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;color:var(--ink);cursor:pointer;padding:8px 0}
+.toggles input{accent-color:var(--acc);margin-top:3px}
+.toggles small{display:block;color:var(--dim);font-size:11.5px;line-height:1.35;margin-top:1px}
+.mbar{display:flex;height:26px;border-radius:8px;overflow:hidden;background:var(--panel2)}
+.mbar i{display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11.5px;font-weight:700;color:#0b0d11;white-space:nowrap;overflow:hidden}
+.mcards2{display:grid;grid-template-columns:1fr 1fr;gap:16px 18px;margin-top:18px}
+.mc2{border-bottom:3px solid;padding-bottom:8px}
+.mc2 .n{color:var(--mut);font-size:12.5px}
+.mc2 .g{display:flex;justify-content:space-between;align-items:baseline;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;margin-top:2px}
+.mc2 .g span{font-size:13px}
+.arch{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:0 16px 14px}
+.arch span{font-size:11.5px;color:var(--mut);border:1px solid var(--line2);border-radius:999px;padding:2px 9px}
+.arch b{color:var(--ink);font-weight:600}
+.linkbtn{background:none;border:0;color:var(--acc);font:500 13px var(--body);cursor:pointer;padding:12px 0 0}
+.linkbtn:hover{text-decoration:underline}
+.sharebtn{background:var(--panel2);border:1px solid var(--line2);color:var(--ink);border-radius:10px;padding:9px 14px;font:600 13px var(--body);cursor:pointer;white-space:nowrap}
+.sharebtn:hover{border-color:var(--accd)}
+.topr{display:flex;gap:10px;align-items:center}
+@media(max-width:640px){.top .in{flex-wrap:wrap;padding:10px 16px;gap:10px}.brand span{display:none}.topr{flex:1 1 100%;justify-content:space-between}.topr .seg{flex:1;min-width:0}.topr .seg button{flex:1;padding-left:6px;padding-right:6px;min-width:0}.topr .sharebtn{padding-left:10px;padding-right:10px;white-space:nowrap}#xtabs{overflow-x:auto;scrollbar-width:none;max-width:100%}#xtabs button{flex:0 0 auto}}
+.fnote{color:var(--dim);font-size:11.5px;line-height:1.35;margin-top:2px}
+.ctlgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 22px;margin-bottom:6px}
+@media(max-width:760px){.ctlgrid{grid-template-columns:1fr}}
+.segc{display:flex;background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:3px;gap:3px;flex-wrap:wrap}
+.segc button{flex:1;min-width:max-content;background:none;border:0;color:var(--mut);font:500 13px var(--body);padding:8px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.segc button:hover{color:var(--ink)}
+.segc button[aria-pressed="true"]{background:var(--accg);color:var(--acc);box-shadow:0 0 0 1px var(--accd) inset}
+.segc.wide{max-width:360px;margin-bottom:6px}
+.sl{margin-top:18px}
+.slg{display:grid;grid-template-columns:1fr 1fr;column-gap:36px;row-gap:4px;align-items:start}
+@media(max-width:760px){.slg{grid-template-columns:1fr}}
+.tottile{margin-top:18px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:2px}
+.tottile span{color:var(--mut);font-size:12.5px}.tottile b{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}.tottile small{color:var(--dim);font-size:12px;font-family:var(--mono)}
+.shint.body{font-family:var(--body)}
+.gsel{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 12px;padding:12px 16px;background:var(--panel2);border:1px solid var(--accd);border-radius:12px}
+.gsn{display:flex;align-items:center;gap:10px}.gsn span{color:var(--mut);font-size:12px}.gsn b{font-family:var(--disp);font-size:16px;font-weight:700;color:var(--ink)}
+.gss{display:flex;gap:22px;flex-wrap:wrap}.gss span{display:flex;flex-direction:column;color:var(--dim);font-size:11.5px;line-height:1.25}.gss b{color:var(--ink);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.gs{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slt span.mn:not(.on){color:transparent}.slt span.mn:not(.on)::after{content:"";position:absolute;left:50%;top:5px;width:3px;height:3px;border-radius:50%;background:var(--line2)}
+.slt span:first-child{transform:none}.slt span:last-child{transform:translateX(-100%)}
+.slh{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.slh label{font-weight:600;font-size:14px}.slh .u{color:var(--dim);font-size:12px;font-weight:400;margin-left:6px}
+.pillin{width:auto!important;min-width:64px;max-width:110px;text-align:center;background:var(--accg)!important;color:var(--acc)!important;border:1px solid var(--accd)!important;border-radius:999px!important;padding:3px 10px!important;font:600 13px var(--mono)!important}
+.sl input[type=range]{width:100%;accent-color:var(--acc);margin:0}
+.slt{position:relative;height:18px;margin:4px 9px 0}
+.slt span{position:absolute;transform:translateX(-50%);color:var(--dim);font-size:11.5px;font-family:var(--mono);cursor:pointer}
+.slt span.on{color:var(--acc);font-weight:600}
+.stepper{display:flex;align-items:stretch;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--panel2)}
+.stepper button{background:none;border:0;color:var(--mut);font:600 18px var(--body);width:40px;cursor:pointer}.stepper button:hover{color:var(--acc);background:var(--line)}
+.stepper input{border:0!important;border-radius:0!important;text-align:center;background:transparent!important}
+.store{display:none}
+details.adv{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
+details.adv summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--ink);list-style:none}
+details.adv summary::before{content:"\25B8  ";color:var(--dim)}details.adv[open] summary::before{content:"\25BE  "}
+.swt{display:flex;gap:10px;align-items:flex-start;padding:9px 0;cursor:pointer;font-size:13.5px}
+.swt input{position:absolute;opacity:0;width:1px;height:1px}
+.knob{flex:none;width:34px;height:20px;border-radius:999px;background:var(--line2);position:relative;transition:background .15s;margin-top:1px}
+.knob::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#c9ced6;transition:transform .15s}
+.swt input:checked+.knob{background:var(--acc)}.swt input:checked+.knob::after{transform:translateX(14px);background:#fff}
+.swt input:focus-visible+.knob{outline:2px solid var(--acc);outline-offset:2px}
+.swt.na{opacity:.45;cursor:not-allowed}
+.chg{font-size:10.5px;font-weight:600;color:var(--vio);background:rgba(167,139,250,.14);border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap}
+.rst{background:none;border:0;color:var(--dim);cursor:pointer;font-size:13px;margin-left:2px;padding:0 3px}.rst:hover{color:var(--ink)}
+.mhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+.findbtn{background:var(--accg);color:var(--acc);border:1px solid var(--accd);border-radius:9px;padding:6px 12px;font:600 12.5px var(--body);cursor:pointer;white-space:nowrap}
+.findbtn:hover{background:rgba(41,180,115,.2)}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(5,6,8,.72);backdrop-filter:blur(4px);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto}
+.modal[hidden]{display:none}
+.mbox{background:var(--panel);border:1px solid var(--line2);border-radius:16px;width:min(1080px,100%);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.mbox header{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--line)}
+.mbox header h3{font-family:var(--disp);font-size:18px}.xbtn{background:none;border:0;color:var(--mut);font-size:22px;cursor:pointer}
+.mbody{padding:18px 22px 22px}
+.mtop{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.reco{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;background:var(--panel2);border:1px solid var(--accd);border-radius:14px;padding:16px 18px;margin-bottom:16px}
+.reco .ring{width:74px;height:74px;border-radius:50%;display:grid;place-items:center}.reco .ring div{width:56px;height:56px;border-radius:50%;background:var(--panel2);display:grid;place-items:center;font-weight:700;font-size:14px}
+.reco .ring div{align-content:center;gap:0;line-height:1.1}.reco .ring small{display:block;font-size:9.5px;font-weight:500;color:var(--dim);text-align:center}
+#falt th small{display:block;color:var(--dim);font-size:10.5px;font-weight:400}
+.reco .k{color:var(--acc);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.reco h4{font-family:var(--disp);font-size:20px;margin:2px 0}.reco .sub{color:var(--mut);font-size:12.5px;font-family:var(--mono)}
+.reco .nums{display:flex;gap:22px;margin-top:10px;flex-wrap:wrap}.reco .nums b{display:block;font-size:17px;font-variant-numeric:tabular-nums}.reco .nums span{color:var(--dim);font-size:11.5px}
+table.alt{width:100%;border-collapse:collapse;font-size:13px}
+.alt th{text-align:left;color:var(--mut);font-weight:500;font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.alt td{padding:10px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:top}
+.alt td small{display:block;color:var(--dim);font-size:11.5px}
+.alt .q{font-family:var(--mono);font-size:11px;border:1px solid var(--line2);border-radius:6px;padding:1px 6px;color:var(--mut)}
+.applyb{background:var(--panel2);border:1px solid var(--line2);color:var(--ink);border-radius:8px;padding:5px 12px;font:500 12.5px var(--body);cursor:pointer}.applyb:hover{border-color:var(--accd);color:var(--acc)}
+/* layout system: one column grid, one label row, one control height */
+:root{--cgap:24px;--rgap:22px;--ctlh:42px}
+.ctlgrid,.slg,.grid2,.grid3,.grid4{column-gap:var(--cgap)!important;row-gap:var(--rgap)!important}
+.ctlgrid{margin-bottom:0}.ctlgrid+.slg,.slg+.slg,.slg+.ctlgrid,.segc.wide+div .slg,.segc.wide+#rig-single,.segc.wide+#rig-single+#rig-cluster{margin-top:var(--rgap)}
+.sl{margin-top:0}
+.f{gap:0}
+.f>label,.slh{min-height:28px;margin:0 0 8px;display:flex;align-items:center;gap:6px;font-weight:600;font-size:14px}
+.slh{justify-content:space-between}
+select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
+.sec .segc{min-height:var(--ctlh);flex-wrap:nowrap;align-items:stretch}.sec .segc button{min-width:0;padding:0 8px;overflow:hidden;text-overflow:ellipsis}
+.pillin{height:28px}
+.fnote{margin-top:8px}
+.sl .fnote{margin-top:2px}
+.segc.wide{max-width:calc(50% - var(--cgap)/2)}
+.hwgrid{margin-top:var(--rgap)}
+.ctlgrid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:900px){.ctlgrid.c3{grid-template-columns:1fr 1fr}}@media(max-width:760px){.ctlgrid.c3{grid-template-columns:1fr}}
+.tottile{margin-top:0;height:var(--ctlh);flex-direction:row;align-items:center;gap:10px;padding:0 14px}
+.tottile b{font-size:17px}
+@media(max-width:760px){.segc.wide{max-width:none}}
+@media(max-width:640px){.gpus{grid-template-columns:1fr 1fr!important;gap:8px}.gcard{padding:10px 11px}.gcard .gt b{font-size:13.5px}.gcard .tag{font-size:9.5px;padding:0 5px}.gr{font-size:14px}.gr small{display:block;margin:2px 0 0}
+.big{font-size:clamp(34px,12vw,56px)!important;letter-spacing:-.02em}}
+</style></head><body data-mode="ft">
+<div class="top"><div class="in">
+  <div class="brand"><img class="logo" src="odyn-glyph.svg" alt="Odyn"><b>odyn</b><span>Compute Calculator</span></div>
+  <div class="topr"><button type="button" class="sharebtn" id="share" title="Copy a link to this exact configuration">Copy link</button>
+  <div class="tabs" role="tablist" id="mode" style="width:280px">
+    <button role="tab" data-mode="ft" aria-selected="true">Fine-tuning</button>
+    <button role="tab" data-mode="inf" aria-selected="false">Inference</button>
+  </div></div>
+</div></div>
+
+<div class="page">
+<main>
+  <div class="card pad form">
+    <div class="fhead"><div><h1 id="h1"></h1><p class="lede" id="lede"></p></div><span class="pill" id="calpill"></span></div>
+
+    <div class="sec">
+      <div class="shead"><span class="step">1</span><h2>Model</h2><span class="shint body" id="mmeta"></span></div>
+      <div class="combo"><input id="model" type="text" role="combobox" aria-expanded="false" autocomplete="off" placeholder="Search 400+ models by name..."><span class="cx">&#9662;</span><div class="pop" id="pop" hidden></div></div>
+      <div class="grid3" id="custom" hidden style="margin-top:14px">
+        <div class="f"><label for="ctot">Total params</label><div class="inp"><input id="ctot" type="number" min="0.1" step="1" value="14"><span class="suf">B</span></div></div>
+        <div class="f"><label for="cact">Active params</label><div class="inp"><input id="cact" type="number" min="0.1" step="0.5" value="14"><span class="suf">B</span></div></div>
+        <div class="f"><label for="ckv">KV per token</label><div class="inp"><input id="ckv" type="number" min="1" step="16" value="160"><span class="suf">KB</span></div></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="shead"><span class="step">2</span><h2>GPU</h2>
+        <div class="seg sm" id="gfilt"><button type="button" data-v="dc" aria-pressed="true">Data centre</button><button type="button" data-v="ws" aria-pressed="false">Workstation</button><button type="button" data-v="mac" aria-pressed="false">Apple</button><button type="button" data-v="fleet" aria-pressed="false">Our fleet</button><button type="button" data-v="all" aria-pressed="false">All</button></div>
+        <span class="shint body" id="gsort"></span><button type="button" class="findbtn" id="findbtn">Find best setup</button></div>
+      <div class="gsel" id="gmeta"></div>
+      <div class="gpus" id="gpus"></div>
+      <button type="button" class="linkbtn" id="gmore" hidden></button>
+      <div class="grid4" id="customgpu" hidden style="margin-top:14px">
+        <div class="f"><label for="cg_vram">VRAM</label><div class="inp"><input id="cg_vram" type="number" min="1" step="1" value="24"><span class="suf">GB</span></div></div>
+        <div class="f"><label for="cg_bw">Memory bandwidth</label><div class="inp"><input id="cg_bw" type="number" min="0.05" step="0.1" value="1"><span class="suf">TB/s</span></div></div>
+        <div class="f"><label for="cg_tf">Compute (BF16)</label><div class="inp"><input id="cg_tf" type="number" min="1" step="10" value="100"><span class="suf">TFLOPS</span></div></div>
+        <div class="f"><label for="cg_rate">Rate (optional)</label><div class="inp"><input id="cg_rate" type="number" min="0" step="0.1" placeholder="none"><span class="suf">$/hr</span></div></div>
+      </div>
+    </div>
+
+    <div id="ftin">
+    <div class="sec">
+      <div class="shead"><span class="step">3</span><h2>Dataset</h2></div>
+      <div class="store" hidden><input id="rows" type="number" min="1" value="10000"><input id="seq" type="number" min="1" value="512"><input id="epochs" type="number" min="1" value="3"></div>
+      <div class="slg">
+        <div class="sl" data-for="rows" data-dec="1" data-alt="1" data-ticks="100,500,1000,5000,10000,50000,100000,500000,1000000" data-label="Samples" data-unit="rows"></div>
+        <div class="sl" data-for="seq" data-ticks="64,128,256,512,1024,2048,4096,8192" data-label="Tokens per sample" data-unit="average"></div>
+        <div class="sl" data-for="epochs" data-ticks="1,2,3,4,5,10" data-label="Epochs"></div>
+        <div class="f"><label>Training tokens</label><div class="tottile" id="ftsum"></div></div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="shead"><span class="step">4</span><h2>Training setup</h2>
+        <label class="shint" style="font-family:var(--body)">Preset <select id="preset" style="width:auto;margin-left:6px;padding:5px 8px;font-size:12.5px"><option value="measured">Our measured setup</option><option value="memory">Memory saver</option><option value="speed">Max speed</option><option value="custom">Custom</option></select></label></div>
+      <div class="ctlgrid">
+        <div class="f"><label>Method</label><div class="segc" data-for="method" data-opts="lora:LoRA|qlora:QLoRA|full:Full fine-tune|dpo:DPO"></div></div>
+        <div class="f"><label>Optimizer</label><div class="segc" data-for="optim" data-opts="adamw:AdamW|lion:Lion|adafactor:Adafactor|sgd:SGD"></div></div>
+        <div class="f" id="rankf"><label>LoRA rank</label><div class="segc" data-for="rank" data-opts="8:8|16:16|32:32|64:64|128:128"></div></div>
+        <div class="f"><label>ZeRO / FSDP stage</label><div class="segc" data-for="zero" data-opts="0:0 DDP|1:1 Optimizer|2:2 +Gradients|3:3 FSDP"></div><div class="fnote" id="zeronote"></div></div>
+      </div>
+      <div class="slg">
+        <div class="sl" data-for="fbatch" data-ticks="1,2,4,8,16,32,64" data-label="Batch size" data-unit="per GPU" data-note="Bigger steps keep the GPU busier: faster, more memory (measured)."></div>
+        <div class="sl" data-for="accum" data-ticks="1,2,4,8,16,32,64" data-label="Gradient accumulation" data-unit="steps"></div>
+        <div class="sl" data-for="maxseq" data-ticks="512,1024,2048,4096,8192,16384,32768" data-label="Max sequence length" data-unit="tokens"></div>
+        <div class="sl" data-for="ngpu" data-ticks="Auto,1,2,4,8" data-label="GPUs" data-unit="" data-note="Auto picks the fewest that fit."></div>
+      </div>
+      <details class="adv" open><summary>Memory and performance optimizations</summary><div class="toggles" id="toggles"></div></details>
+      <div class="store" hidden>
+        <select id="optim"><option value="adamw">AdamW</option><option value="lion">Lion</option><option value="adafactor">Adafactor</option><option value="sgd">SGD (momentum)</option></select>
+        <select id="method"><option value="lora">LoRA</option><option value="qlora">QLoRA</option><option value="full">Full</option><option value="dpo">DPO</option></select>
+        <select id="rank"><option>8</option><option selected>16</option><option>32</option><option>64</option><option>128</option></select>
+        <input id="fbatch" type="number" min="1" value="1">
+        <select id="maxseq"><option>512</option><option>1024</option><option selected>2048</option><option>4096</option><option>8192</option><option>16384</option><option>32768</option></select>
+        <select id="accum"><option>1</option><option>2</option><option>4</option><option selected>8</option><option>16</option><option>32</option><option>64</option></select>
+        <select id="zero"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option></select>
+        <select id="ngpu"><option value="0" selected>Auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select>
+      </div>
+    </div>
+    </div>
+
+    <div id="infin" hidden>
+    <div class="sec">
+      <div class="shead"><span class="step">3</span><h2>Workload</h2></div>
+      <div class="slg">
+        <div class="sl" data-for="pin" data-alt="1" data-ticks="128,256,512,1024,2048,4096,8192,16384,32768,65536,131072" data-label="Prompt length" data-unit="tokens in"></div>
+        <div class="sl" data-for="pout" data-ticks="64,128,256,512,1024,2048,4096,8192" data-label="Output length" data-unit="tokens out"></div>
+      </div>
+      <div class="slg">
+        <div class="sl" data-for="conc" data-alt="1" data-ticks="1,2,4,8,16,32,64,128,256,512,1024,2048,4096" data-label="Concurrent users" data-unit="in flight"></div>
+        <div class="sl" data-for="ibatch" data-ticks="1,2,4,8" data-label="Batch per user" data-unit="sequences"></div>
+      </div>
+      <div class="store" hidden><input id="conc" type="number" min="1" max="4096" value="32"><input id="pin" type="number" min="1" value="2048"><input id="pout" type="number" min="1" value="512"><input id="ibatch" type="number" min="1" value="1"></div>
+    </div>
+    <div class="sec">
+      <div class="shead"><span class="step">4</span><h2>Precision and memory</h2></div>
+      <div class="ctlgrid c3">
+        <div class="f"><label>Weight precision</label><div class="segc" data-for="wq" data-opts="bf16:BF16|fp8:FP8|int8:INT8|int4:INT4"></div><div class="fnote">FP8 uses FP8 tensor cores where the GPU has them.</div></div>
+        <div class="f"><label>KV cache precision</label><div class="segc" data-for="kvq" data-opts="fp16:FP16|fp8:FP8|int8:INT8|int4:INT4"></div></div>
+        <div class="f"><label>Offloading</label><div class="segc" data-for="offload" data-opts=":Off|cpu:CPU RAM|nvme:NVMe"></div><div class="fnote">Only used when weights do not fit.</div></div>
+      </div>
+      <div class="store" hidden>
+        <select id="wq"><option value="bf16">BF16</option><option value="fp8">FP8</option><option value="int8">INT8</option><option value="int4">INT4</option></select>
+        <select id="kvq"><option value="fp16">FP16</option><option value="fp8">FP8</option><option value="int8">INT8</option><option value="int4">INT4</option></select>
+        <select id="offload"><option value="">Off</option><option value="cpu">CPU</option><option value="nvme">NVMe</option></select>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="shead"><span class="step">5</span><h2>Hardware configuration</h2><span class="shint body" id="topohint"></span></div>
+      <div class="segc wide" data-for="rig" data-opts="single:Single rig|cluster:Cluster"></div>
+      <div class="slg hwgrid">
+      <div id="rig-single"><div class="sl" data-for="sgpu" data-ticks="1,2,4,8" data-label="GPUs" data-unit="tensor parallel"></div></div>
+      <div id="rig-cluster" hidden style="display:contents">
+        <div class="sl" data-for="tp" data-ticks="1,2,4,8,16,32" data-label="Tensor parallel" data-unit="GPUs per layer"></div>
+        <div class="sl" data-for="pp" data-ticks="1,2,4,8" data-label="Pipeline parallel" data-unit="stages"></div>
+        <div class="sl" data-for="gpn" data-ticks="1,2,4,8" data-label="GPUs per node" data-unit=""></div>
+      </div>
+      <div class="f" ><label for="link">GPU interconnect</label><select id="link"><option value="auto">Auto, from the GPU</option><option value="nvlink">NVLink</option><option value="pcie">PCIe</option><option value="node">InfiniBand, across nodes</option></select><div class="fnote">Faster links cut the cost of splitting a model across GPUs.</div></div>
+      </div>
+      <div class="store" hidden>
+        <select id="rig"><option value="single" selected>single</option><option value="cluster">cluster</option></select>
+        <select id="sgpu"><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
+        <select id="gpn"><option>1</option><option>2</option><option>4</option><option selected>8</option></select>
+        <select id="tp"><option selected>1</option><option>2</option><option>4</option><option>8</option><option>16</option><option>32</option></select>
+        <select id="pp"><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card explore">
+    <div class="head"><h3 id="xh"></h3><div class="seg sm" id="mview" hidden></div></div>
+    <div class="xtabs" role="tablist" id="xtabs"></div>
+    <div class="panel">
+      <div id="p-chart"><div class="cv"><canvas id="cv"></canvas></div><div class="legend" id="leg"></div><p class="cap-note" id="cnote"></p></div>
+      <div id="p-matrix" hidden><div class="tblscroll"><table class="m" id="mx"></table></div><div class="legend" id="mleg"></div></div>
+      <div id="p-sim" hidden><div class="simbar"><span id="simr"></span><button class="btn" id="simgo">Play</button></div><div id="simt"></div></div>
+    </div>
+  </div>
+
+  <details class="card how">
+    <summary>How we calculate</summary>
+    <div class="howbody"><div><b>Method and accuracy report</b>Held-out accuracy on our measured runs, measured hardware vs datasheet, and the tested price cap: <a href="method.html" style="color:var(--acc)">read the report</a>.</div>
+      <div><b>Fine-tune throughput</b>Measured with our own benchmark (transformers + PEFT, real model configs, full-length sequences), plus our earlier runs on real data (SDS). Each setting is a measured ratio against the same run with base settings: checkpointing off, eager attention, LoRA rank, optimizer, QLoRA, DPO, MoE. It uses the same GPU where we have it, otherwise the average of the GPUs we measured, and says which. Speed depends on tokens per GPU per step (batch x processed length), fitted across model sizes on our runs; it replaced an older rule that had short sequences getting faster, which our controlled runs contradict. Where we ran the exact setup, the page uses that run and shows its id. GPUs and models we have not run use a fit to our runs, tok/s = e<sup>level</sup> x N<sup>-0.734</sup>. Multi-GPU speed is fitted on our 2, 4 and 8 GPU runs against the same run on 1 GPU: DDP (and ZeRO-1/2) keeps about 97% per GPU at any count; FSDP (ZeRO-3) costs a one-off 12 to 21% that grows with model size and is lower on faster GPUs, then stays almost flat. It uses the GPU's own runs where we have them, otherwise the other GPUs'; counts beyond those measured are extrapolated and marked from specs. ZeRO-3 re-gathers the weights every micro-batch; where that traffic outlasts the compute (big MoE models, PCIe cards) the estimate slows to the link speed. Padding every sample to max length wastes compute in proportion; packing removes our measured 1.3x padding.</div>
+      <div><b>Price cap</b>A conformal bound on actual vs estimated cost, tested by hiding each of our 15 single-GPU runs in turn: the 80% cap held for 12 of 15, the 90% cap for 14 of 15. Predicting each of our 4 multi-GPU runs from the other 3, both caps held for all 4. A GPU is fine-tune quoted once we have measured runs on it; the rest are marked as needing a calibration job.</div>
+      <div><b>Memory</b>Weights = params x precision bytes (QLoRA NF4 about 0.55). KV cache = 2 x KV heads x head dim x tokens x layers (latent for MLA models), reduced by sliding windows. Training adds gradients (2 bytes per trained param), optimizer state (AdamW 8, Lion 4, SGD 4 bytes, a quarter with 8-bit), fp32 master weights for full fine-tune unless pure 16-bit, activations (shrunk by gradient checkpointing, plus attention scores without Flash Attention) and an fp32 logits buffer (smaller with fused kernels). Full fine-tune lands at 16 bytes per param, matching apxml.</div>
+      <div><b>Inference (estimate)</b>Calibrated on published NVIDIA NIM, TensorRT-LLM and llama.cpp results (13 of 13 within 20%). A decode step takes the longer of reading the weights plus every sequence's KV cache at 74.5% of bandwidth (56% for INT4) and its compute: decode tokens at 16% of peak, the prompts feeding them at 58%. Each step adds 1.4 ms, and tensor parallel adds two all-reduces per layer (36 µs NVLink, 90 µs PCIe, 120 µs across nodes). First token is 7.5 ms plus the prompt's compute at 58% of peak, attention included, which dominates long prompts. FP8 uses FP8 tensor cores where the GPU has them. MoE reads more experts as the batch grows. Pipeline stages overlap at 90% (assumed). Offloaded weights are re-read each step over PCIe (25 GB/s) or NVMe (7 GB/s). Max users is set by KV memory at 90% of VRAM.</div>
+      <div><b>Rates</b>Our invoiced rate where we have one: A100 $1.425 (Gcore commits) and H100 $2.60 (Gcore PAYG). Others use a public on-demand list price: RunPod Secure Cloud (13 Sep 2026), Lambda, or the Vast index. Apple machines are bought, not rented, so they have no hourly rate. GPUs with no rate in these sources show time and speed only. Costs add our 10% overhead and no margin.</div>
+      <div><b>Models and GPUs</b>412 models with architecture (layers, KV heads, head dim, experts, sliding windows, MLA) from each model's config.json on Hugging Face and exact parameter counts from its weights. 44 GPUs across NVIDIA, AMD, Apple and Intel, plus a custom GPU, with vendor datasheet specs (dense BF16, no sparsity).</div>
+    </div>
+  </details>
+</main>
+
+<aside class="side">
+  <div class="card">
+    <div class="hero">
+      <span class="status" id="status"></span>
+      <div class="big num" id="big"></div>
+      <div class="under" id="under"></div>
+      <span class="chip" id="chip" hidden></span>
+    </div>
+    <div class="mini" id="mini"></div>
+    <div class="arch" id="arch"></div>
+    <div class="tabs stabs" role="tablist" id="stabs">
+      <button role="tab" data-t="perf" aria-selected="true">Performance</button>
+      <button role="tab" data-t="cost" aria-selected="false">Cost and energy</button>
+    </div>
+    <div class="rows" id="srows"></div>
+  </div>
+  <div class="card mem">
+    <div class="mhead"><h4 style="margin:0">Memory allocation</h4><div class="segc" data-for="memv" data-opts="gpu:Per GPU|total:Total" style="flex:none"></div></div>
+    <div class="fnote" id="memt" style="margin:-4px 0 10px"></div>
+    <div class="store" hidden><select id="memv"><option value="gpu" selected>gpu</option><option value="total">total</option></select></div>
+    <div class="mbar" id="mbar"></div>
+    <div class="mcards2" id="mcards"></div>
+  </div>
+</aside>
+</div>
+
+<div class="modal" id="finder" hidden role="dialog" aria-modal="true" aria-labelledby="fh"><div class="mbox"><header><h3 id="fh"></h3><button type="button" class="xbtn" id="fclose" aria-label="Close">&times;</button></header>
+<div class="mbody"><div class="mtop"><div class="segc" id="fgoal" style="flex:none"><button type="button" data-v="cost" aria-pressed="true">Lowest cost</button><button type="button" data-v="speed" aria-pressed="false">Fastest</button></div><span class="fnote" id="fcount"></span></div>
+<div id="freco"></div><table class="alt" id="falt"></table><p class="fnote" style="margin-top:12px" id="ffoot"></p></div></div></div>
+<script src="models.js?v=1790514739"></script>
+<script src="gpus.js?v=1790514739"></script>
+<script src="measured.js?v=1790525390"></script>
+<script src="engine.js?v=1790514739"></script>
+<script>
+const $=id=>document.getElementById(id);
+const MEASURED=window.MEASURED||{train:[],infer:[],pods:[]};
+const S={zero:3,ngpu:0,link:"auto",rig:"single",sgpu:1,memv:"gpu",basePreset:"measured",fgoal:"cost",mode:"ft",model:"qwen3-14b",gpu:"h100",gf:"dc",method:"lora",optim:"adamw",rank:16,fbatch:1,maxseq:2048,accum:8,preset:"measured",
+ flash:true,ckpt:true,opt8:false,fused:false,packing:false,dynpad:true,pure16:false,
+ wq:"bf16",kvq:"fp16",ibatch:1,offload:"",gpn:8,tp:1,pp:1,cov:90,st:"perf",xt:null,mv:"cost",api:{ft:3,in:0.15,out:0.60},gco2:475};
+GPUS.custom={name:"Custom GPU",sn:"Custom",v:"Custom",tier:"custom",tf:100,bw:1,vram:24,tdp:300,rate:null,rsrc:"your specs",fleet:false,ftq:"x",mkt:{},maxN:8};
+const TOG=[["flash","Flash Attention","Skips storing attention scores: less memory and faster (measured)."],
+ ["ckpt","Gradient checkpointing","Recomputes activations: far less memory, slower (measured)."],
+ ["opt8","8-bit optimizer","Optimizer states in 8 bits: 4x smaller, slightly slower (measured)."],
+ ["fused","Fused kernels","Fused cross-entropy: logits buffer about 8x smaller."],
+ ["packing","Sequence packing","Packs samples to max length: no padding, 1.3x more useful tokens/s (our measured padding)."],
+ ["dynpad","Dynamic padding","Pads to the longest sample in each batch instead of max length."],
+ ["pure16","Pure 16-bit training","bf16 weights, gradients and optimizer states; no fp32 master copy. Full fine-tune only."]];
+const PRESETS={measured:{flash:1,ckpt:1,opt8:0,fused:0,packing:0,dynpad:1,pure16:0},
+ memory:{flash:1,ckpt:1,opt8:1,fused:1,packing:0,dynpad:1,pure16:1},
+ speed:{flash:1,ckpt:0,opt8:0,fused:1,packing:1,dynpad:0,pure16:0}};
+const LIM={rows:[1,1e9],seq:[1,131072],epochs:[1,100],pin:[1,1048576],pout:[1,131072],conc:[1,4096],ibatch:[1,64],fbatch:[1,512],ctot:[0.1,10000],cact:[0.1,10000],ckv:[1,100000],cg_vram:[1,4096],cg_bw:[0.05,100],cg_tf:[1,100000],cg_rate:[0,1000]};
+const clampV=(id,v)=>{const l=LIM[id];if(!l||v===""||!isFinite(+v))return v;return String(Math.min(l[1],Math.max(l[0],+v)));};
+const num=id=>Math.max(1,+clampV(id,$(id).value)||1);
+const money=n=>n==null||!isFinite(n)?"n/a":"$"+(n<0.1?n.toFixed(3):n<10?n.toFixed(2):n<100?n.toFixed(1):Math.round(n).toLocaleString());
+const int=n=>Math.round(n).toLocaleString();
+const dur=h=>h<1?Math.max(1,Math.round(h*60))+" min":h<48?h.toFixed(1)+" h":(h/24).toFixed(1)+" days";
+const ms=s=>s<1?Math.round(s*1000)+" ms":s<60?s.toFixed(s<10?2:1)+" s":s<3600?(s/60).toFixed(1)+" min":(s/3600).toFixed(1)+" h";
+const tpotF=t=>t<100?t.toFixed(1)+" ms":ms(t/1000);
+const gb=x=>x>=1000?(x/1000).toFixed(2)+" T":x<10?x.toFixed(1):int(x);
+const tpsF=v=>v<1?v.toFixed(2):v<10?v.toFixed(1):int(v);
+const fmtP=p=>p<1?(p*1000).toFixed(0)+"M":p<100?(+p.toFixed(1))+"B":Math.round(p)+"B";
+const less=(o,t)=>(t-o)/t*100;
+const short=k=>GPUS[k].sn;
+const TAG={M:"measured on our GPUs",P:"predicted from our runs",X:"estimated from specs"};
+const rateStr=g=>g.rate==null?g.rsrc:`$${g.rate.toFixed(2)}/GPU-hr, ${g.rsrc}`;
+
+function model(mk){
+  if(mk!=="__c")return MODELS[mk];
+  const t=Math.max(+$("ctot").value||1,+$("cact").value||1),a=Math.min(+$("cact").value||1,t),kb=+$("ckv").value||160;
+  const h=Math.round(Math.sqrt(t*1e9/12/32)/128)*128||4096;
+  const m={l:"Custom model",org:"custom",custom:1,p:t,a,f:a,L:32,attnL:32,h,nh:h/128,i:0,kv:8,hd:128,kve:kb*1024/2/32,vocab:0,ctx:0};
+  if(t>a*1.05)Object.assign(m,{moe:1,E:1000,k:Math.max(1,Math.round(1000*a/t))});
+  return m;
+}
+const ftOpt=()=>({rows:num("rows"),seq:num("seq"),epochs:num("epochs"),method:S.method,cov:S.cov,optim:S.optim,rank:S.rank,batch:S.fbatch,maxseq:S.maxseq,accum:S.accum,
+ flash:S.flash,ckpt:S.ckpt,opt8:S.opt8,fused:S.fused,packing:S.packing,dynpad:S.dynpad,pure16:S.pure16,zero:S.zero,ngpu:S.ngpu||0});
+const gpusHave=gk=>{const mx=GPUS[gk].maxN||8;return S.rig==="cluster"?(S.gpn>mx?mx:1e9):mx;};   // a cluster adds nodes as needed; a box still holds at most maxN
+const infOpt=(C,gk)=>({maxGpus:gpusHave(gk||S.gpu),pin:num("pin"),pout:num("pout"),C:C||num("conc"),wq:S.wq,kvq:S.kvq,batch:S.ibatch,tp:S.tp,pp:S.pp,gpn:S.gpn,offload:S.offload,link:S.link});
+const FT=(gk,mk)=>ft(gk,model(mk),mk,ftOpt());
+const INF=(gk,mk,C)=>inf(gk,model(mk),infOpt(C,gk));
+
+const row=(l,v,ls,vs,cls)=>`<div class="r"><span class="l">${l}${ls?`<small>${ls}</small>`:""}</span><span class="v ${cls||""}">${v}${vs?`<small>${vs}</small>`:""}</span></div>`;
+function pct(p){return p==null?"n/a":Math.abs(p)<1?"on par":`<span class="${p>=0?"good":"warn"}">${Math.round(Math.abs(p))}% ${p>=0?"cheaper":"dearer"}</span>`;}
+function fitTip(){const t=[];if(S.wq!=="int4")t.push("INT4");if(S.rig==="single"?S.sgpu<Math.min(8,GPUS[S.gpu].maxN||8):true)t.push("more GPUs");if(!S.offload)t.push("offloading");return t.length?". Try "+t.join(", ").replace(/, ([^,]*)$/," or $1"):". Try a bigger GPU";}
+function statusEl(t,c){$("status").className="status "+c;$("status").textContent=t;}
+const mini=a=>a.map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join("");
+function memory(parts,cap,title){
+  const need=parts.filter(p=>!p.inv&&p.n!=="Free").reduce((a,p)=>a+p.v,0);
+  if(need>cap*1.001){parts=parts.filter(p=>p.n!=="Free");parts.push({n:"Over capacity",v:need-cap,c:"#ff6b6b",inv:1});
+    $("memt").innerHTML=`<span class="warn">needs ${gb(need)} GB, has ${gb(cap)} GB</span>`;}
+  else $("memt").textContent=title;
+  const tot=Math.max(cap,parts.reduce((a,p)=>a+(p.inv?0:p.v),0));
+  $("mbar").innerHTML=parts.filter(p=>p.v>0&&!p.inv).map(p=>{const w=p.v/tot*100;return`<i style="width:${w}%;background:${p.c}">${w>=8?Math.round(w)+"%":""}</i>`;}).join("");
+  $("mcards").innerHTML=parts.filter(p=>p.v>0||!p.opt).map(p=>`<div class="mc2" style="border-color:${p.c}"><div class="n">${p.n}</div><div class="g">${gb(p.v)} GB<span style="color:${p.c}">${p.n==="Over capacity"?"short":p.inv?"off-GPU":(p.v/tot*100).toFixed(1)+"%"}</span></div></div>`).join("");
+}
+function archChips(m,extra){const a=[`<span>Attention <b>${attnType(m)}</b></span>`];if(m.sw)a.push(`<span>Sliding window <b>${m.win}</b></span>`);
+  if(m.moe)a.push(m.custom?`<span>Active <b>${Math.round(m.a/m.p*100)}%</b></span>`:`<span>Experts <b>${m.k} of ${m.E}</b></span>`);a.push(...extra.map(([k,v])=>`<span>${k} <b>${v}</b></span>`));$("arch").innerHTML=a.join("");}
+function buildControls(){
+  document.querySelectorAll(".sl").forEach(el=>{const id=el.dataset.for,ticks=el.dataset.ticks.split(","),n=ticks.length-1;
+    el.innerHTML=`<div class="slh"><label for="r_${id}">${el.dataset.label}${el.dataset.unit?`<span class="u">${el.dataset.unit}</span>`:""}</label><input class="pillin" type="text" inputmode="numeric" aria-label="${el.dataset.label} value"></div>
+      <input type="range" id="r_${id}" min="0" max="${n}" step="1" aria-label="${el.dataset.label}"><div class="slt">${ticks.map((t,i)=>`<span data-i="${i}" style="left:${i/n*100}%"${el.dataset.alt&&i%2?' class="mn"':""}>${fmtTick(t,el.dataset.dec)}</span>`).join("")}</div>${el.dataset.note?`<div class="fnote">${el.dataset.note}</div>`:""}`;
+    const tgt=$(id),range=el.querySelector("input[type=range]"),pill=el.querySelector(".pillin");
+    const set=v=>{tgt.value=v;tgt.dispatchEvent(new Event("input",{bubbles:true}));tgt.dispatchEvent(new Event("change",{bubbles:true}));};
+    range.addEventListener("input",()=>set(ticks[+range.value]==="Auto"?"0":ticks[+range.value]));
+    el.querySelector(".slt").addEventListener("click",e=>{const sp=e.target.closest("span[data-i]");if(sp){range.value=sp.dataset.i;range.dispatchEvent(new Event("input"));}});
+    pill.addEventListener("change",()=>{let v=pill.value.trim().toLowerCase().replace(/,/g,"");if(v==="auto")v="0";const kk=el.dataset.dec?1000:1024;let x=/k$/.test(v)?parseFloat(v)*kk:/m$/.test(v)?parseFloat(v)*kk*kk:parseFloat(v);if(!(x>=0))return syncControls();
+      if(tgt.tagName==="SELECT"){const opts=[...tgt.options].map(o=>+o.value);x=opts.reduce((a,b)=>Math.abs(b-x)<Math.abs(a-x)?b:a);}else x=Math.max(1,Math.round(x));set(clampV(id,String(x)));});
+    el._sync=()=>{const v=tgt.value;let idx=ticks.findIndex(t=>(t==="Auto"?"0":t)===String(v));if(idx<0){const nv=+v;idx=ticks.reduce((b,t,i)=>t!=="Auto"&&Math.abs(+t-nv)<Math.abs(+ticks[b]-nv)?i:b,ticks[0]==="Auto"?1:0);}
+      range.value=idx;pill.value=(v==="0"&&ticks[0]==="Auto")?"Auto":(+v).toLocaleString();el.querySelectorAll(".slt span").forEach((sp,i)=>sp.classList.toggle("on",i===idx));};});
+  document.querySelectorAll(".segc[data-for]").forEach(el=>{const id=el.dataset.for;el.innerHTML=el.dataset.opts.split("|").map(o=>{const i=o.indexOf(":");return`<button type="button" data-v="${o.slice(0,i)}">${o.slice(i+1)}</button>`;}).join("");
+    el.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const t=$(id);t.value=b.dataset.v;t.dispatchEvent(new Event("change",{bubbles:true}));});
+    el._sync=()=>el.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===$(id).value));});
+  document.querySelectorAll(".stepper").forEach(st=>st.addEventListener("click",e=>{const b=e.target.closest("button[data-step]");if(!b)return;const inp=st.querySelector("input");inp.value=Math.max(1,(+inp.value||1)+(+b.dataset.step));inp.dispatchEvent(new Event("input",{bubbles:true}));}));
+}
+function fmtTick(t,dec){if(t==="Auto")return"Auto";const n=+t;if(dec)return n>=1e6?(n/1e6)+"M":n>=1000?(n/1000)+"K":String(n);return n>=1024&&n%1024===0?(n/1024)+"K":String(n);}
+function syncControls(){document.querySelectorAll(".sl,.segc[data-for]").forEach(el=>el._sync&&el._sync());}
+function toggles(){const base=PRESETS[S.basePreset]||PRESETS.measured;
+  $("toggles").innerHTML=TOG.map(([k,l,h])=>{const ch=!!S[k]!==!!base[k],na=k==="pure16"&&S.method!=="full";return`<label class="swt${na?" na":""}"><input type="checkbox" role="switch" data-k="${k}" ${S[k]?"checked":""}${na?" disabled":""}><span class="knob"></span><span>${l}${ch?`<span class="chg">changed</span><button type="button" class="rst" data-r="${k}" title="Reset to ${S.basePreset==="measured"?"our measured setup":S.basePreset}">&#8634;</button>`:""}<small>${h}</small></span></label>`;}).join("");}
+/* GPU cards */
+const inFilt=(k,f)=>f==="all"||(k!=="custom"&&(f==="fleet"?GPUS[k].fleet:GPUS[k].tier===f));
+const vis=()=>Object.keys(GPUS).filter(k=>inFilt(k,S.gf));
+function rankGpus(){const isFt=S.mode==="ft",items=[];
+  for(const k of vis()){const g=GPUS[k],r=isFt?FT(k,S.model):INF(k,S.model);let grp,key;
+    if(!r.fits){grp=3;key=0;}else if(isFt&&!r.quoted){grp=2;key=0;}
+    else if(isFt){if(r.cost==null){grp=1;key=r.hours;}else{grp=0;key=r.cost;}}
+    else{if(r.perM==null){grp=1;key=-r.agg;}else{grp=0;key=r.perM;}}
+    if(k==="custom")grp+=0.5;items.push({k,g,r,grp,key,off:grp>=2});}
+  return items.sort((a,b)=>a.grp-b.grp||a.key-b.key);}
+function followFilter(){if(!inFilt(S.gpu,S.gf)){const it=rankGpus();if(it.length)S.gpu=it[0].k;}}
+function gpuTag(g){if(g.tier==="custom")return'<span class="tag none">Your specs</span>';return g.fleet?'<span class="tag fleet">Our fleet</span>':/provisional/.test(g.rsrc)?'<span class="tag prov">Provisional</span>':g.rate!=null?'<span class="tag mkt">Market</span>':g.unified?'<span class="tag none">Not for rent</span>':'<span class="tag none">No rate</span>';}
+function gpuCards(){
+  const isFt=S.mode==="ft",items=rankGpus();let best=null,bv=Infinity;
+  for(const it of items){const{k,g,r}=it;const nr=g.unified?"not for rent":"no rate";
+    if(!r.fits)it.line='<div class="gr na">Does not fit</div>';
+    else if(isFt&&!r.quoted)it.line='<div class="gr na">No measured speed yet</div>';
+    else if(isFt)it.line=r.cost==null?`<div class="gr">${dur(r.hours)}<small>${r.n>1?r.n+" GPUs, ":""}${nr}</small></div>`:`<div class="gr">${money(r.cost)}<small>${dur(r.hours)}${r.n>1?" · "+r.n+" GPUs":""}</small></div>`;
+    else it.line=r.perM==null?`<div class="gr">${fmtK(r.agg)} tok/s<small>${nr}</small></div>`:`<div class="gr">${money(r.perM)}<small>/1M · ${fmtK(r.agg)} tok/s</small></div>`;
+    if(it.grp===0&&g.fleet&&it.key<bv){bv=it.key;best=k;}}
+  const allOff=items.length>0&&items.every(x=>x.off),show=S.showOff||allOff;
+  const hidden=items.filter(x=>x.off&&x.k!==S.gpu&&!show).length;
+  const card=({k,g,line,off})=>`<button type="button" class="gcard${k===S.gpu?" sel":""}${off?" off":""}" data-g="${k}" aria-pressed="${k===S.gpu}" title="${g.name} · ${g.rate!=null?"$"+g.rate.toFixed(2)+"/hr, "+g.rsrc:g.rsrc}">${k===best?'<span class="best" title="Cheapest of the GPUs we actually run (A100, H100, V100)">Best on our fleet</span>':""}
+      <div class="gt"><b>${short(k)}</b>${gpuTag(g)}</div><div class="gs">${g.vram} GB${g.rate!=null?` · $${g.rate.toFixed(2)}/hr`:""}</div>${line}</button>`;
+  $("gpus").innerHTML=items.filter(x=>!x.off||x.k===S.gpu||show).map(card).join("")+(allOff?`<div class="fnote" style="grid-column:1/-1">${isFt&&items.some(x=>x.r.fits&&!x.r.quoted)?"None of these can be quoted for this job yet. We have not measured fine-tuning speed on them.":"None of these can run this job."}</div>`:"");
+  const offN=items.filter(x=>x.off&&x.k!==S.gpu).length;
+  $("gmore").hidden=offN===0||allOff;$("gmore").textContent=S.showOff?`Hide the ${offN} that can't run this job`:`Show ${hidden} more that can't run this job`;
+  $("gsort").textContent=isFt?"Sorted by job cost":"Sorted by cost per 1M tokens";
+}
+
+/* searchable model picker */
+function chips(){}
+let popHi=-1;
+function fillInput(){$("model").value=S.model==="__c"?"Custom model":(MODELS[S.model]?MODELS[S.model].l:"");}
+function openPop(q){
+  q=(q||"").toLowerCase().trim();
+  let items=Object.entries(MODELS);
+  if(q){const toks=q.split(/[\s-]+/).filter(Boolean);items=items.filter(([k,m])=>{const hay=(m.l+" "+m.org+" "+k).toLowerCase().replace(/-/g," ");return toks.every(t=>hay.includes(t));});}
+  items.sort((a,b)=>(b[1].anchor?1:0)-(a[1].anchor?1:0)||b[1].dl-a[1].dl);
+  items=items.slice(0,60);
+  let h=items.map(([k,m])=>`<button type="button" data-m="${k}"><span>${m.l}${m.moe?'<span class="moe">MoE</span>':""}${m.anchor?' <span class="moe" style="color:var(--acc);border-color:var(--accd)">measured</span>':""}</span><small>${fmtP(m.p)} · ${m.org}</small></button>`).join("");
+  h+=`<button type="button" data-m="__c"><span>Custom model...</span><small>set params</small></button>`;
+  $("pop").innerHTML=h;$("pop").hidden=false;$("model").setAttribute("aria-expanded","true");popHi=-1;
+}
+function closePop(){$("pop").hidden=true;$("model").setAttribute("aria-expanded","false");fillInput();}
+function pickModel(k){S.model=k;closePop();chips();render();}
+
+function render(){
+  const isFt=S.mode==="ft",g=GPUS[S.gpu],m=model(S.model);
+  document.querySelectorAll("#mode button").forEach(b=>b.setAttribute("aria-selected",b.dataset.mode===S.mode));
+  document.querySelectorAll("#stabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.t===S.st));
+  $("ftin").hidden=!isFt;$("infin").hidden=isFt;$("custom").hidden=S.model!=="__c";
+  $("h1").textContent=isFt?"Fine-tuning: cost and time":"Inference: speed and cost";
+  const im=!isFt&&INF(S.gpu,S.model),exact=im&&im.measured&&(MEASURED.infer||[]).some(r=>im.runs.includes(r.run_id)&&r.conc===im.B),ownInf=!isFt&&(MEASURED.infer||[]).some(r=>r.gpu===S.gpu);
+  $("lede").textContent=isFt?"Based on fine-tuning runs we measured on our own GPUs, with a tested price cap.":ownInf?"Measured with vLLM on this GPU where we have a matching run; otherwise estimated from bandwidth and compute and corrected with our vLLM runs.":"Estimated from GPU memory bandwidth and compute, checked against published benchmarks. No vLLM run of ours on this GPU yet.";
+  $("calpill").className="pill "+(isFt||ownInf?"cal":"est");$("calpill").textContent=isFt?"Calibrated on our runs":exact?"Measured on our vLLM runs":ownInf?"Calibrated on our vLLM runs":"Roofline estimate";
+  const parts=[m.moe?`${fmtP(m.p)} total, ${fmtP(m.a)} active (MoE)`:`${fmtP(m.p)} params`];
+  if(m.custom)parts.push(`${int(+$("ckv").value||160)} KB KV per token`,"layout assumed (32 layers)");else if(m.L>1)parts.push(`${m.L} layers`,`${m.kv} KV heads`);if(m.mla)parts.push("MLA");if(m.sw)parts.push("sliding window");
+  $("mmeta").textContent=parts.join(" · ");fillInput();
+  $("gmeta").innerHTML=`<div class="gsn"><span>Selected GPU</span><b>${g.name}</b>${gpuTag(g)}</div><div class="gss"><span><b>${g.vram} GB</b>memory</span><span><b>${g.bw} TB/s</b>bandwidth</span><span><b>${g.tf.toLocaleString()} TFLOPS</b>${g.unified?"FP16 GPU":"BF16 dense"}</span><span><b>${g.rate!=null?"$"+g.rate.toFixed(2)+"/hr":g.unified?"not for rent":"no rate"}</b>${g.rate!=null?g.rsrc:"per GPU"}</span></div>`;
+  $("customgpu").hidden=S.gpu!=="custom";$("rankf").hidden=S.method==="full";
+  $("rig-single").hidden=S.rig!=="single";$("rig-cluster").hidden=S.rig!=="cluster";
+  $("zeronote").textContent={0:"Every GPU holds a full copy. Simplest, most memory.",1:"Splits optimizer state across GPUs.",2:"Also splits gradients.",3:"Also splits the weights (FSDP). Least memory per GPU, reproduces our measured runs."}[S.zero]+(FT(S.gpu,S.model).n===1?" No effect on 1 GPU.":"");
+  syncControls();
+  const used=S.rig==="cluster"?S.tp*S.pp:S.sgpu,nodes=Math.ceil(used/S.gpn);$("topohint").textContent=S.rig==="cluster"?`${used} GPU${used>1?"s":""} on ${nodes} node${nodes>1?"s":""}${S.tp>S.gpn?" · TP spans nodes (slower)":""}`:`${used} GPU${used>1?"s":""} in one box`;
+  $("preset").value=S.preset;toggles();
+  gpuCards();chips();
+  isFt?sideFt(g,m):sideInf(g,m);explore();writeURL();
+}
+
+function sideFt(g,m){
+  const r=FT(S.gpu,S.model),ok=r.fits&&r.quoted,hasCost=ok&&r.cost!=null;
+  const all=vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost),fb=all.filter(x=>GPUS[x[0]].fleet);
+  if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(!r.quoted)statusEl("NEEDS CALIBRATION","st-warn");else if(r.n>1)statusEl(`NEEDS ${r.n} GPUS`,"st-multi");else statusEl("FITS ON 1 GPU","st-ok");
+  $("big").textContent=hasCost?money(r.cost):ok?dur(r.hours):"n/a";
+  $("under").textContent=hasCost?`${dur(r.hours)} on ${r.n}x ${g.name}`:ok?`${dur(r.hours)} on ${r.n}x ${g.name} · ${g.tier==="custom"?"add a rate to see cost":g.unified?"not for rent, no cost":"no rate on file"}`:!r.fits?"needs "+r.why:r.why;
+  $("chip").hidden=!hasCost;if(hasCost)$("chip").innerHTML=`capped at <b>${money(r.cap)}</b> (${S.cov}%)`;
+  $("mini").innerHTML=mini([[ok?dur(r.hours):"n/a","time"],[ok?fmtK(r.jobTok)+" tok/s":"n/a","throughput"],[ok?Math.round(r.mfu)+"%":"n/a","GPU use"]]);
+  $("ftsum").innerHTML=`<b>${r.tt>=1e9?(r.tt/1e9).toFixed(2)+"B":(r.tt/1e6).toFixed(1)+"M"}</b><small>= ${int(num("rows"))} x ${int(num("seq"))} x ${int(num("epochs"))} epoch${num("epochs")>1?"s":""}</small>`;
+  archChips(m,[["Method",{lora:"LoRA",qlora:"QLoRA",full:"Full",dpo:"DPO"}[S.method]],["Base",S.method==="qlora"?"NF4":"BF16"]]);
+  if(S.st==="perf")$("srows").innerHTML=ok?
+    row("Time to train",dur(r.hours),r.hours<0.5?'<span class="warn">training only; startup (image, model load) not modelled</span>':"training wall clock")+row("Throughput",`${int(r.jobTok)} tok/s`,r.tag==="M"&&r.adj.length?"our measured run, adjusted":TAG[r.tag],r.n>1?`${int(r.eff)} per GPU`:"")+
+    row("GPUs",`${r.n}x ${short(S.gpu)}`,"set by memory")+row("Method",{lora:"LoRA",qlora:"QLoRA 4-bit",full:"Full",dpo:"DPO"}[S.method],`${S.optim}${S.method!=="full"?", rank "+S.rank:""}`)+
+    row("Trainable params",r.mem.trainable<1?(r.mem.trainable*1000).toFixed(0)+"M":r.mem.trainable.toFixed(1)+"B","of "+fmtP(m.p))+
+    row("GPU utilisation",`${Math.round(r.mfu)}%`,"MFU on useful tokens")+row("Samples per second",r.sps.toFixed(2),`${r.stepsPerSec.toFixed(3)} optimizer steps/s`)+row("Global batch",`${r.gbatch} samples`,`${S.fbatch} x ${S.accum} accumulation x ${r.n} GPU${r.n>1?"s":""}`)+row("Optimizer steps",int(r.steps),"over the whole run")+(r.adj.length?row("Adjusted from measured",r.adj.join(", "),"setup differs from our runs"):"")
+    :row("Status",!r.fits?"does not fit":r.why);
+  else{$("srows").innerHTML=
+    row("Job cost",hasCost?money(r.cost):"n/a","our cost incl. 10% overhead")+
+    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`held for ${CAP[S.cov].cov} past runs`:"")+
+    row("Cost per 1M tokens",hasCost?money(r.perM):"n/a","training tokens")+
+    row("vs fine-tune API",hasCost?pct(less(r.perM,S.api.ft)):"n/a",`our ${hasCost?money(r.perM):"n/a"} vs API $<input id="apift" type="number" min="0" step="0.5" value="${S.api.ft}"> /1M`,"default gpt-4o-mini")+
+    marketRow(g)+row("Energy",ok?`${(r.kwh<10?r.kwh.toFixed(2):int(r.kwh))} kWh`:"n/a",r.powerMeasured?"at our measured power draw":"at full GPU power")+
+    row("Carbon",ok?`${(r.kwh*S.gco2/1000).toFixed(2)} kg CO2e`:"n/a",`<input id="gco2" type="number" min="0" step="25" value="${S.gco2}"> g/kWh`,"475 = global average");
+    $("cov").onclick=e=>{const b=e.target.closest("button");if(b){S.cov=+b.dataset.v;render();}};bindApiFt();}
+  const mm=r.mem,n=Math.min(r.n,g.maxN),z=r.zero==null?3:r.zero,T=S.memv==="total",sh=(v,st)=>z>=st?v/n:v,k=T?n:1,cap=vramOf(g)*k;
+  const parts=[{n:"Model weights",v:sh(mm.weights,3)*k,c:"#5b9cf5"},{n:"Activations",v:mm.act*k,c:"#29B473"},{n:"Optimizer states",v:sh(mm.opt,1)*k,c:"#8b6cf0"},{n:"Gradients",v:sh(mm.grad,2)*k,c:"#e05a86"},{n:"Temp buffers",v:mm.temp*k,c:"#f08a3c"},{n:"Framework overhead",v:mm.ovh*k,c:"#f2c94c"}];
+  const used=parts.reduce((a,p)=>a+p.v,0);parts.push({n:"Free",v:Math.max(0,cap-used),c:"#3a404c"});
+  memory(parts,cap,`${gb(used)} of ${gb(cap)} GB${g.unified?" usable":""} ${T?"across "+n+" GPU"+(n>1?"s":""):"per GPU"}${!T&&n>1?" · "+n+" GPUs":""}${n>1?" · ZeRO-"+z:""}`);
+}
+function sideInf(g,m){
+  const r=INF(S.gpu,S.model),Cin=num("conc"),hasCost=r.fits&&r.perM!=null;
+  if(r.over)statusEl("NOT ENOUGH GPUS","st-bad");else if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(r.offGB>0)statusEl(`FITS WITH OFFLOAD · ${gb(r.offGB)} GB OFF-GPU`,"st-warn");else if(r.queued)statusEl(r.cmax===1?"ONLY 1 USER FITS":`ONLY ${r.cmax} USERS FIT`,"st-warn");else statusEl(`FITS · UP TO ${int(r.cmax)} USERS`,"st-ok");
+  archChips(m,[["Weights",$("wq").selectedOptions[0].text.split(" ")[0]],["KV cache",$("kvq").selectedOptions[0].text.split(" ")[0]],["GPUs",`${r.tp} TP x ${r.pp} PP`]]);
+  $("big").textContent=r.fits?`${tpsF(r.agg)} tok/s`:"n/a";
+  $("under").textContent=r.fits?`total output for ${r.B} in flight · ${tpsF(r.perUser)} tok/s each`:r.over?r.why+`. A ${short(S.gpu)} box holds up to ${GPUS[S.gpu].maxN||8}${S.rig==="cluster"?"; lower GPUs per node":""}.`:"weights plus one sequence do not fit"+fitTip()+".";
+  $("chip").hidden=!hasCost;if(hasCost)$("chip").innerHTML=`<b>${money(r.perM)}</b> per 1M output tokens`;
+  const bound=r.fits?(r.tcomp>=r.tmem?"compute-bound":"memory-bound"):"";
+  $("mini").innerHTML=mini([[r.fits?ms(r.ttft):"n/a","first token"],[r.fits?tpotF(r.tpot):"n/a","per token"],[r.fits?int(r.cmax):"n/a","max users"]]);
+  if(S.st==="perf")$("srows").innerHTML=r.fits?
+    row("Time to first token",ms(r.ttft),`${int(num("pin"))}-token prompt, no queueing${r.B>1?"; rises under load":""}`)+row("Per-token latency",tpotF(r.tpot),`at ${r.B} in flight`)+
+    row("Speed per user",`${tpsF(r.perUser)} tok/s`,`single: ${tpsF(r.single)} tok/s`)+row("Full response",ms(r.lat),`${int(num("pout"))} output tokens`)+
+    row("Requests per hour",int(r.rph))+row("Max users",int(r.cmax),`${r.N>1?r.N+" GPUs, ":""}before KV memory is full`)+(r.offGB>0?row("Offloaded weights",gb(r.offGB)+" GB",S.offload==="nvme"?"read from NVMe each step (~7 GB/s)":"read from CPU RAM each step (~25 GB/s)","","warn"):"")+
+    row("Regime",bound,r.knee?`saturates near ${int(r.knee)} in flight`:"")
+    :row("Status","does not fit",`${gb(r.wGB)} GB of weights on ${gb(vramOf(g)*r.N)} GB${g.unified?" usable":""}`);
+  else{const apiReq=(num("pin")*S.api.in+num("pout")*S.api.out)/1e6*1000;$("srows").innerHTML=
+    row("Cost per 1M output tok",hasCost?money(r.perM):"n/a","prompt processing included")+row("Cost per 1k requests",hasCost?money(r.per1k):"n/a",`${int(num("pin"))} in, ${int(num("pout"))} out`)+
+    row("vs inference API",hasCost?pct(less(r.per1k,apiReq)):"n/a",`in $<input id="apiin" type="number" min="0" step="0.05" value="${S.api.in}"> out $<input id="apiout" type="number" min="0" step="0.05" value="${S.api.out}"> /1M`,`API ${money(apiReq)} per 1k`)+
+    marketRow(g)+row("Energy per 1M tok",r.fits?`${gb(r.wh1m)} Wh`:"n/a","at full GPU power")+
+    row("Carbon per 1M tok",r.fits?`${int(r.wh1m*S.gco2/1000)} g CO2e`:"n/a",`<input id="gco2" type="number" min="0" step="25" value="${S.gco2}"> g/kWh`,"475 = global average");
+    bindApiInf();}
+  const N=r.N,mm=r.mem||{weights:r.wGB,kv:0,act:0,ovh:1.6*N,off:0},d=S.memv==="total"?1:N,cap=vramOf(g)*N/d,used=(mm.weights+mm.kv+mm.act+mm.ovh)/d;
+  memory([{n:"Model weights",v:mm.weights/d,c:"#5b9cf5"},{n:"KV cache",v:mm.kv/d,c:"#8b6cf0"},{n:"Activations",v:mm.act/d,c:"#29B473"},{n:"Framework overhead",v:mm.ovh/d,c:"#f2c94c"},{n:"Free",v:Math.max(0,cap-used),c:"#3a404c"},{n:"Offloaded",v:(mm.off||0)/d,c:"#f08a3c",inv:1,opt:1}],cap,`${gb(used)} of ${gb(cap)} GB ${d===1&&N>1?"across "+N+" GPUs":"per GPU"}${d>1?" · "+N+" GPUs":""}`);
+}
+function marketRow(g){const e=Object.entries(g.mkt);
+  if(!g.fleet)return row("GPU-hour vs market","n/a",g.rate==null?(g.unified?"buy only, no rental price":"no rate on file"):"list price shown");
+  if(!e.length)return row("GPU-hour vs market","n/a","no market price on file");
+  return row("GPU-hour vs market",`$${g.rate.toFixed(2)}/hr`,"our cost",e.map(([k,v])=>`${k} $${v.toFixed(2)}: ${pct(less(g.rate,v))}`).join("<br>"));}
+function bindApiFt(){$("apift").onchange=e=>{S.api.ft=+e.target.value||0;render();};$("gco2").onchange=e=>{S.gco2=+e.target.value||0;render();};}
+function bindApiInf(){$("apiin").onchange=e=>{S.api.in=+e.target.value||0;render();};$("apiout").onchange=e=>{S.api.out=+e.target.value||0;render();};$("gco2").onchange=e=>{S.gco2=+e.target.value||0;render();};}
+function setPct(){}
+
+/* explore tabs */
+const XT={ft:[["bands","Price by GPU"],["frontier","Cost vs speed"],["matrix","All models"]],inf:[["curve","Scaling with users"],["frontier","Cost vs speed"],["matrix","All models"],["sim","Live preview"]]};
+function explore(){
+  const tabs=XT[S.mode];if(!tabs.some(t=>t[0]===S.xt))S.xt=tabs[0][0];
+  $("xtabs").innerHTML=tabs.map(([k,l])=>`<button role="tab" data-x="${k}" aria-selected="${k===S.xt}">${l}</button>`).join("");
+  $("p-chart").hidden=!["bands","frontier","curve"].includes(S.xt);$("p-matrix").hidden=S.xt!=="matrix";$("p-sim").hidden=S.xt!=="sim";$("mview").hidden=S.xt!=="matrix";
+  const m=model(S.model),isFt=S.mode==="ft";$("cv").parentElement.style.height="340px";
+  if(S.xt==="bands"){$("xh").textContent=`Estimate and price cap: ${{dc:"data centre GPUs",ws:"workstation GPUs",mac:"Apple machines",fleet:"our fleet",all:"every GPU"}[S.gf]} with a rate`;
+    const rows=vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).sort((a,b)=>a[1].cost-b[1].cost);
+    $("cv").parentElement.style.height=Math.max(160,rows.length*40+44)+"px";
+    bands(rows.map(([k,x])=>({k,lo:x.cost,hi:x.cap,tag:x.tag,n:x.n})));
+    $("leg").innerHTML=`<span><span class="sw" style="background:var(--M)"></span>measured</span><span><span class="sw" style="background:var(--P)"></span>predicted</span><span><span class="sw" style="background:var(--X)"></span>from specs</span><span><span class="sw sq" style="background:rgba(41,180,115,.4)"></span>up to the ${S.cov}% cap</span>`;
+    $("cnote").textContent=`${m.l}, ${(num("rows")*num("seq")*num("epochs")/1e6).toFixed(2)}M training tokens. x2, x4 = GPUs needed.`;}
+  if(S.xt==="frontier"){$("xh").textContent="Cost per 1M tokens vs throughput";
+    const pts=isFt?vis().map(k=>[k,FT(k,S.model)]).filter(x=>x[1].fits&&x[1].quoted&&x[1].cost!=null).map(([k,x])=>({k,x:x.jobTok,y:x.perM,tag:x.tag,n:x.n}))
+      :vis().map(k=>[k,INF(k,S.model)]).filter(x=>x[1].fits&&x[1].perM!=null).map(([k,x])=>({k,x:x.agg,y:x.perM,tag:"X",n:x.N}));
+    frontier(pts,isFt?"training tok/s":"output tok/s");
+    $("leg").innerHTML=(isFt?`<span><span class="sw" style="background:var(--M)"></span>measured</span><span><span class="sw" style="background:var(--P)"></span>predicted</span>`:"")+`<span><span class="sw" style="background:var(--X)"></span>${isFt?"from specs":"estimate"}</span><span>ring = cheapest on our fleet</span>`;
+    $("cnote").textContent=`Lower and further right is better. ${m.l}${isFt?"":`, ${num("conc")} users`}.`;}
+  if(S.xt==="curve"){$("xh").textContent=`Throughput as users grow on ${GPUS[S.gpu].name}`;curve(INF(S.gpu,S.model));
+    $("leg").innerHTML=`<span><span class="sw" style="background:var(--blue)"></span>total tok/s (left)</span><span><span class="sw" style="background:var(--warn)"></span>per user tok/s (right)</span><span>dashed: saturation and KV limit</span>`;
+    $("cnote").textContent="Before the saturation point extra users are almost free. After it, every user slows the others.";}
+  if(S.xt==="matrix"){$("xh").textContent=isFt?"Fine-tune cost for this dataset, every model on every GPU":`Serving at ${num("conc")} users, every model on every GPU`;matrix();}
+  if(S.xt==="sim"){$("xh").textContent="Live preview: one user's response at this load";simReset();}
+}
+
+/* charts */
+const COL={M:"#29B473",P:"#f2b13c",X:"#7d8794"},GRID="#22262f",TXT="#6b7482";
+function cvs(){const c=$("cv"),d=Math.min(devicePixelRatio||1,2),w=c.clientWidth,h=c.clientHeight;c.width=w*d;c.height=h*d;const x=c.getContext("2d");x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);x.font="11.5px Inter,system-ui";return[x,w,h];}
+const fmtY=v=>v<1e-9?"$0":Math.abs(v-Math.round(v))<1e-9?"$"+Math.round(v):v<0.1?"$"+v.toFixed(3):v<10?"$"+v.toFixed(2):"$"+Math.round(v);
+const fmtK=v=>v>=1e6?(v/1e6).toFixed(1)+"M":v>=1e4?(v/1e3).toFixed(0)+"k":v>=1e3?(v/1e3).toFixed(1)+"k":Math.round(v)+"";
+const fmtA=v=>v>0&&v<10&&Math.abs(v-Math.round(v))>1e-9?v.toFixed(1):fmtK(v).replace(/\.0(?=[kM])/,"");
+const niceStep=raw=>{const p=Math.pow(10,Math.floor(Math.log10(raw)));return[1,2,2.5,5,10].map(k=>k*p).find(k=>k>=raw*0.999);};
+const nice=v=>{if(!(v>0))return{max:1,step:0.25,n:4};const st=niceStep(v/4),n=Math.ceil(v/st-1e-9);return{max:st*n,step:st,n};};
+function empty(x,w,h,t){x.fillStyle=TXT;x.textAlign="center";x.fillText(t,w/2,h/2);x.textAlign="left";}
+const lab=p=>short(p.k)+(p.n>1?" x"+p.n:"");
+function frontier(pts,xl){const[x,w,h]=cvs();if(!pts.length)return empty(x,w,h,"No GPU with a rate can run this");
+  const pad={l:60,r:30,t:14,b:38},xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  const lx0=Math.log(Math.min(...xs)*0.8),lx1=Math.log(Math.max(...xs)*1.3),ny=nice(Math.max(...ys)*1.1),ym=ny.max;
+  const X=v=>pad.l+(Math.log(v)-lx0)/(lx1-lx0)*(w-pad.l-pad.r),Y=v=>h-pad.b-v/ym*(h-pad.t-pad.b);
+  for(let v=0;v<=ym+1e-9;v+=ny.step){x.strokeStyle=GRID;x.beginPath();x.moveTo(pad.l,Y(v));x.lineTo(w-pad.r,Y(v));x.stroke();x.fillStyle=TXT;x.fillText(fmtY(v),6,Y(v)+4);}
+  x.textAlign="center";{const a=Math.ceil(lx0/Math.LN10*3-1e-9),b=Math.floor(lx1/Math.LN10*3+1e-9);for(let j=a;j<=b;j++){const v=[1,2,5][((j%3)+3)%3]*Math.pow(10,Math.floor(j/3));x.fillText(fmtA(v),X(v),h-20);}}x.fillText(xl+" (log scale)",(w+pad.l)/2,h-4);x.textAlign="left";
+  const fp=pts.filter(p=>GPUS[p.k].fleet),best=fp.length?fp.reduce((a,b)=>b.y<a.y?b:a):null,placed=[];pts.sort((a,b)=>(a.k===S.gpu)-(b.k===S.gpu));
+  for(const p of pts){const px=X(p.x),py=Y(p.y),cur=p.k===S.gpu;
+    if(p===best){x.strokeStyle=COL.M;x.lineWidth=1.5;x.beginPath();x.arc(px,py,11,0,7);x.stroke();}
+    x.fillStyle=COL[p.tag];x.beginPath();x.arc(px,py,cur?7:5,0,7);x.fill();if(cur){x.strokeStyle="#eceff4";x.lineWidth=2;x.stroke();}
+    // label beside its own dot: try right, then left, at small vertical nudges; never over another dot
+    const tw=x.measureText(lab(p)).width,dots=pts.map(q=>[X(q.x),Y(q.y)]),hit=(x0,y0)=>placed.some(q=>x0<q.x1&&x0+tw>q.x0&&Math.abs(q.y-y0)<12)||dots.some(([dx,dy])=>!(dx===px&&dy===py)&&dx>x0-6&&dx<x0+tw+6&&Math.abs(dy-(y0-4))<9);
+    let pos=null;for(const d of[0,-8,8,-14,14])for(const side of[1,-1]){const gap=(p===best||cur)?16:11,x0=side>0?px+gap:px-gap-tw,y0=py+4+d;if(!pos&&x0>pad.l&&x0+tw<w-4&&!hit(x0,y0))pos=[x0,y0];}
+    if(!pos)pos=[px+11,py+4];x.fillStyle=cur?"#eceff4":"#a0a8b6";x.textAlign="left";x.fillText(lab(p),pos[0],pos[1]);placed.push({x0:pos[0],x1:pos[0]+tw,y:pos[1]});}}
+function bands(rows){const[x,w,h]=cvs();if(!rows.length)return empty(x,w,h,"No GPU with a rate can run this");
+  const pad={l:104,r:150,t:8,b:26},rh=Math.min(40,(h-pad.t-pad.b)/rows.length),nb=nice(Math.max(...rows.map(r=>r.hi))*1.04),mx=nb.max;const X=v=>pad.l+v/mx*(w-pad.l-pad.r);
+  for(let v=0;v<=mx+1e-9;v+=nb.step){x.strokeStyle=GRID;x.beginPath();x.moveTo(X(v),pad.t);x.lineTo(X(v),pad.t+rh*rows.length);x.stroke();x.fillStyle=TXT;x.textAlign="center";x.fillText(fmtY(v),X(v),pad.t+rh*rows.length+18);}
+  rows.forEach((r,i)=>{const cy=pad.t+rh*i+rh/2,cur=r.k===S.gpu;if(cur){x.fillStyle="rgba(236,239,244,.05)";x.fillRect(0,cy-rh/2,w,rh);}
+    x.fillStyle="rgba(41,180,115,.28)";x.beginPath();x.roundRect(X(r.lo),cy-6,Math.max(4,X(r.hi)-X(r.lo)),12,6);x.fill();x.fillStyle=COL[r.tag];x.beginPath();x.arc(X(r.lo),cy,5,0,7);x.fill();
+    x.textAlign="right";x.fillStyle=cur?"#eceff4":"#a0a8b6";x.fillText(lab(r),pad.l-12,cy+4);x.textAlign="left";x.fillText(`${money(r.lo)} (cap ${money(r.hi)})`,X(r.hi)+10,cy+4);});x.textAlign="left";}
+function curve(r){const[x,w,h]=cvs();if(!r.fits)return empty(x,w,h,"Does not fit"+fitTip()+".");
+  const pad={l:56,r:52,t:16,b:38},cmax=Math.min(r.cmax,2048),top=Math.max(2,Math.pow(2,Math.ceil(Math.log2(cmax)))),Cs=[];
+  for(let c=1;c<=cmax;c=c<8?c+1:Math.ceil(c*1.25))Cs.push(c);if(Cs[Cs.length-1]!==cmax)Cs.push(cmax);
+  const pts=Cs.map(c=>INF(S.gpu,S.model,c)),na=nice(Math.max(...pts.map(p=>p.agg))*1.08),ym=na.max,us=niceStep(Math.max(...pts.map(p=>p.perUser))*1.08/na.n),ys=us*na.n;
+  const lt=Math.log2(top),X=c=>pad.l+Math.log2(c)/lt*(w-pad.l-pad.r),Y=v=>h-pad.b-v/ym*(h-pad.t-pad.b),Y2=v=>h-pad.b-v/ys*(h-pad.t-pad.b);
+  for(let i=0;i<=na.n;i++){const v=na.step*i;x.strokeStyle=GRID;x.beginPath();x.moveTo(pad.l,Y(v));x.lineTo(w-pad.r,Y(v));x.stroke();x.fillStyle=TXT;x.textAlign="left";x.fillText(fmtA(v),8,Y(v)+4);x.fillStyle="#c9953a";x.textAlign="right";x.fillText(fmtA(us*i),w-6,Y(v)+4);}
+  x.fillStyle=TXT;x.textAlign="center";for(let c=1;c<=top;c*=2)x.fillText(c,X(c),h-20);x.fillText("concurrent users (log scale)",(w+pad.l)/2,h-4);
+  const vline=(c,t,dy)=>{if(c<1||c>top)return;x.save();x.setLineDash([4,4]);x.strokeStyle="#59616e";x.beginPath();x.moveTo(X(c),pad.t);x.lineTo(X(c),h-pad.b);x.stroke();x.restore();const rt=X(c)>w-170;x.fillStyle="#a0a8b6";x.textAlign=rt?"right":"left";x.fillText(t,X(c)+(rt?-8:8),pad.t+dy);};
+  if(r.knee&&r.knee<cmax*0.85)vline(r.knee,`saturates near ${int(r.knee)}`,12);vline(cmax,`KV full at ${int(r.cmax)}`,r.knee&&r.knee<cmax*0.85?30:12);
+  const gr=x.createLinearGradient(0,pad.t,0,h-pad.b);gr.addColorStop(0,"rgba(92,200,255,.22)");gr.addColorStop(1,"rgba(92,200,255,0)");
+  x.fillStyle=gr;x.beginPath();x.moveTo(X(Cs[0]),h-pad.b);pts.forEach((p,i)=>x.lineTo(X(Cs[i]),Y(p.agg)));x.lineTo(X(Cs[Cs.length-1]),h-pad.b);x.closePath();x.fill();
+  const line=(f,col)=>{x.strokeStyle=col;x.lineWidth=2.4;x.beginPath();pts.forEach((p,i)=>{const px=X(Cs[i]),py=f(p);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();x.lineWidth=1;};
+  line(p=>Y2(p.perUser),"#f2b13c");line(p=>Y(p.agg),"#5cc8ff");
+  const C=Math.min(num("conc"),cmax);x.fillStyle="#eceff4";x.beginPath();x.arc(X(C),Y(r.agg),6,0,7);x.fill();const rt=X(C)>w-180;x.textAlign=rt?"right":"left";x.fillText(`${int(C)}: ${fmtK(r.agg)} tok/s`,X(C)+(rt?-10:10),Y(r.agg)+18);x.textAlign="left";}
+
+/* all-models matrix (curated shortlist of families for width) */
+const MROWS=["llama-3.2-1b","llama-3.2-3b","qwen3-8b","llama-3.1-8b","gpt-oss-20b","qwen3-14b","gemma-3-12b","phi-4","mistral-small-24b","gemma-3-27b","qwen3-32b","mixtral-8x7b","qwen3-30b-a3b","llama-3.3-70b","qwen2.5-72b","qwen3-235b-a22b"].filter(k=>MODELS[k]);
+function matrix(){const isFt=S.mode==="ft",allG=vis(),needRate=S.mv==="cost",gks=allG.filter(gk=>(!needRate||GPUS[gk].rate!=null)&&MROWS.some(mk=>{const r=isFt?FT(gk,mk):INF(gk,mk);return r.fits&&(!isFt||r.quoted);})),hid=allG.length-gks.length;const views=isFt?[["cost","Cost"],["time","Time"]]:[["cost","$ per 1M"],["tps","tok/s"]];if(!views.some(v=>v[0]===S.mv))S.mv="cost";
+  $("mview").innerHTML=views.map(([k,l])=>`<button type="button" data-v="${k}" aria-pressed="${k===S.mv}">${l}</button>`).join("");
+  let h=`<thead><tr><th>Model</th>${gks.map(g=>`<th>${short(g)}<small>${GPUS[g].vram} GB · ${GPUS[g].rate==null?(GPUS[g].unified?"not for rent":"no rate"):"$"+GPUS[g].rate.toFixed(2)}</small></th>`).join("")}</tr></thead><tbody>`;
+  for(const mk of MROWS){const M=MODELS[mk];const cells=gks.map(gk=>{const r=isFt?FT(gk,mk):INF(gk,mk);const okc=r.fits&&(isFt?r.quoted:true);return{gk,r,val:!okc?null:isFt?(S.mv==="cost"?r.cost:r.hours):(S.mv==="cost"?r.perM:r.agg)};});
+    const fv=cells.filter(c=>c.val!=null&&GPUS[c.gk].fleet).map(c=>c.val),lo=fv.length?(S.mv==="tps"?Math.max(...fv):Math.min(...fv)):null;
+    h+=`<tr><td>${M.l}${M.moe?'<span class="moe">MoE</span>':""}</td>`;
+    for(const c of cells){const cur=c.gk===S.gpu&&mk===S.model?" cur":"",d=`data-g="${c.gk}" data-m="${mk}"`;
+      if(!c.r.fits){h+=`<td class="nf${cur}" ${d}>n/fit</td>`;continue;}if(isFt&&!c.r.quoted){h+=`<td class="nf${cur}" ${d}>calib.</td>`;continue;}if(c.val==null){h+=`<td class="nf${cur}" ${d}>${GPUS[c.gk].unified?"not for rent":"no rate"}</td>`;continue;}
+      const tag=isFt?c.r.tag:"X",xn=isFt&&c.r.n>1?`<span class="xn">x${c.r.n}</span>`:"";
+      h+=`<td class="${cur}${c.val===lo&&GPUS[c.gk].fleet?" lo":""}" ${d}>${isFt?(S.mv==="cost"?money(c.val):dur(c.val)):(S.mv==="cost"?money(c.val):fmtK(c.val))}${xn}<span class="t t-${tag}">${tag}</span></td>`;}
+    h+="</tr>";}
+  $("mx").innerHTML=h+"</tbody>";
+  $("mleg").innerHTML=(isFt?`<span><b class="t t-M">M</b> measured</span><span><b class="t t-P">P</b> predicted</span><span><b class="t t-X">X</b> specs</span>`:`<span><b class="t t-X">X</b> estimate</span><span>n/fit = try INT4 or more GPUs</span>`)+`<span class="good">green = best on our fleet</span><span>click a cell</span>`+(hid?`<span>${hid} GPU${hid>1?"s":""} hidden: ${needRate?"no rate or ":""}cannot run these models</span>`:"");}
+
+/* live preview */
+const SIMTXT="Here is a summary of the quarterly results. Revenue grew in every region, led by strong demand for GPU capacity. Utilisation on the committed A100 nodes rose week over week, and fine-tuning jobs now make up the largest share of usage. Next quarter the focus is on inference: faster first tokens, more users per GPU, and a lower cost per request. ".repeat(3).trim().split(" ");
+let simTimer=null;
+function simReset(){clearTimeout(simTimer);simTimer=null;$("simt").textContent="";$("simgo").textContent="Play";const r=INF(S.gpu,S.model);$("simr").textContent=r.fits?`First token after ${ms(r.ttft)}, then ${int(r.perUser)} tok/s`:"Does not fit on this GPU";}
+$("simgo").onclick=()=>{if(simTimer){simReset();return;}const r=INF(S.gpu,S.model);if(!r.fits)return;$("simgo").textContent="Stop";$("simt").textContent="";let i=0,tok=0;const t0=performance.now(),total=Math.min(num("pout"),SIMTXT.length*1.3);
+  const tick=()=>{const el=(performance.now()-t0)/1000-r.ttft;if(el>0){const want=Math.min(total,el*r.perUser);while(tok<want&&i<SIMTXT.length){tok+=1.3;$("simt").textContent+=(i?" ":"")+SIMTXT[i++];}}if(tok<total&&i<SIMTXT.length)simTimer=setTimeout(tick,16);else{simTimer=null;$("simgo").textContent="Play";}};simTimer=setTimeout(tick,16);};
+
+/* wiring */
+chips();
+$("mode").onclick=e=>{const b=e.target.closest("button");if(b){S.mode=b.dataset.mode;render();}};
+$("stabs").onclick=e=>{const b=e.target.closest("button");if(b){S.st=b.dataset.t;render();}};
+$("xtabs").onclick=e=>{const b=e.target.closest("button");if(b){S.xt=b.dataset.x;explore();}};
+$("mview").onclick=e=>{const b=e.target.closest("button");if(b){S.mv=b.dataset.v;matrix();}};
+$("mx").onclick=e=>{const td=e.target.closest("td[data-g]");if(!td)return;S.gpu=td.dataset.g;S.model=td.dataset.m;render();};
+$("gpus").onclick=e=>{const b=e.target.closest(".gcard");if(b){S.gpu=b.dataset.g;render();}};
+$("gfilt").onclick=e=>{const b=e.target.closest("button");if(b){S.gf=b.dataset.v;followFilter();$("gfilt").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));render();}};
+$("model").addEventListener("focus",e=>{e.target.select();openPop("");});
+$("model").addEventListener("mousedown",e=>{if(document.activeElement===e.target){if($("pop").hidden)openPop("");else closePop();}});
+$("model").addEventListener("input",()=>openPop($("model").value));
+$("model").addEventListener("keydown",e=>{const bs=[...$("pop").querySelectorAll("button")];if(e.key==="ArrowDown"){e.preventDefault();popHi=Math.min(popHi+1,bs.length-1);}else if(e.key==="ArrowUp"){e.preventDefault();popHi=Math.max(popHi-1,0);}else if(e.key==="Enter"){e.preventDefault();const b=bs[popHi]||bs[0];if(b)pickModel(b.dataset.m);return;}else if(e.key==="Escape"){closePop();return;}else return;bs.forEach((b,i)=>b.classList.toggle("hi",i===popHi));if(bs[popHi])bs[popHi].scrollIntoView({block:"nearest"});});
+$("pop").addEventListener("mousedown",e=>{const b=e.target.closest("button");if(b){e.preventDefault();pickModel(b.dataset.m);}});
+document.addEventListener("click",e=>{if(!e.target.closest(".combo"))closePop();});
+["rows","seq","epochs","pin","pout","ctot","cact","ckv","fbatch","ibatch"].forEach(id=>$(id).addEventListener("input",render));
+$("conc").addEventListener("input",render);
+["method","optim","rank","wq","kvq"].forEach(id=>$(id)&&$(id).addEventListener("change",e=>{S[id]=id==="rank"?+e.target.value:e.target.value;render();}));
+$("fbatch").addEventListener("input",e=>{S.fbatch=Math.max(1,+e.target.value||1);});
+$("ibatch").addEventListener("input",e=>{S.ibatch=Math.max(1,+e.target.value||1);});
+["maxseq","accum","gpn","tp","pp","zero","ngpu"].forEach(id=>$(id).addEventListener("change",e=>{S[id]=+e.target.value;render();}));
+$("link").addEventListener("change",e=>{S.link=e.target.value;render();});$("memv").addEventListener("change",e=>{S.memv=e.target.value;render();});
+$("rig").addEventListener("change",e=>{S.rig=e.target.value;if(S.rig==="single"){S.gpn=8;S.pp=1;S.tp=S.sgpu;$("gpn").value=8;$("pp").value=1;$("tp").value=S.sgpu;}render();});
+$("sgpu").addEventListener("change",e=>{S.sgpu=+e.target.value;S.tp=S.sgpu;S.pp=1;S.gpn=8;$("tp").value=S.sgpu;$("pp").value=1;$("gpn").value=8;render();});
+$("toggles").addEventListener("click",e=>{const b=e.target.closest(".rst");if(!b)return;e.preventDefault();const base=PRESETS[S.basePreset]||PRESETS.measured;S[b.dataset.r]=!!base[b.dataset.r];
+  S.preset=TOG.every(([k])=>!!S[k]===!!base[k])?S.basePreset:"custom";render();});
+$("offload").addEventListener("change",e=>{S.offload=e.target.value;render();});
+$("preset").addEventListener("change",e=>{S.preset=e.target.value;if(PRESETS[S.preset]){S.basePreset=S.preset;for(const[k,v]of Object.entries(PRESETS[S.preset]))S[k]=!!v;}render();});
+$("toggles").addEventListener("change",e=>{const k=e.target.dataset.k;if(!k)return;S[k]=e.target.checked;const base=PRESETS[S.basePreset]||PRESETS.measured;S.preset=TOG.every(([x])=>!!S[x]===!!base[x])?S.basePreset:"custom";render();});
+["cg_vram","cg_bw","cg_tf","cg_rate"].forEach(id=>$(id).addEventListener("input",()=>{const c=GPUS.custom;c.vram=+$("cg_vram").value||24;c.bw=+$("cg_bw").value||1;c.tf=+$("cg_tf").value||100;const rt=$("cg_rate").value;c.rate=rt===""?null:+rt;c.name=`Custom ${c.vram}GB`;render();}));
+let rt;addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(explore,120);});
+const TK=["flash","ckpt","opt8","fused","packing","dynpad","pure16"];
+const UI_IN={s:"rows",t:"seq",e:"epochs",pi:"pin",po:"pout",u:"conc",ib:"ibatch",fb:"fbatch",cgv:"cg_vram",cgb:"cg_bw",cgt:"cg_tf",cgr:"cg_rate",ct:"ctot",ca:"cact",ck:"ckv"};
+const UI_SEL={me:"method",op:"optim",r:"rank",ms:"maxseq",ac:"accum",wq:"wq",kq:"kvq",of:"offload",gn:"gpn",tp:"tp",pp:"pp",z:"zero",ng:"ngpu",ln:"link",rg:"rig",sg:"sgpu",mv:"memv"};
+let urlTimer=null;function writeURL(){clearTimeout(urlTimer);urlTimer=setTimeout(writeURLNow,200);}
+function writeURLNow(){urlTimer=null;const q=new URLSearchParams();q.set("mode",S.mode);q.set("model",S.model);q.set("gpu",S.gpu);q.set("gf",S.gf);q.set("cov",S.cov);
+  for(const[k,id]of Object.entries(UI_IN)){const v=$(id).value;if(v!=="")q.set(k,v);}for(const[k,id]of Object.entries(UI_SEL))q.set(k,$(id).value);
+  q.set("tg",TK.map(k=>S[k]?1:0).join(""));q.set("pr",S.preset);if(S.st!=="perf")q.set("st",S.st);if(S.xt)q.set("xt",S.xt);
+  try{history.replaceState(null,"","?"+q.toString());}catch(e){}}
+const qs=new URLSearchParams(location.search);
+if(qs.get("mode")==="inf")S.mode="inf";if(qs.get("model")in MODELS||qs.get("model")==="__c")S.model=qs.get("model");if(qs.get("gpu")in GPUS)S.gpu=qs.get("gpu");
+if(["dc","ws","mac","fleet","all"].includes(qs.get("gf")))S.gf=qs.get("gf");if(qs.get("cov")==="80")S.cov=80;if(qs.get("st")==="cost")S.st="cost";if(qs.get("xt"))S.xt=qs.get("xt");
+for(const[k,id]of Object.entries(UI_IN))if(qs.has(k)&&(qs.get(k)===""||isFinite(+qs.get(k))))$(id).value=clampV(id,qs.get(k));
+for(const[k,id]of Object.entries(UI_SEL))if(qs.has(k)&&[...$(id).options].some(o=>o.value===qs.get(k))){$(id).value=qs.get(k);const v=qs.get(k);S[id]=["rank","maxseq","accum","gpn","tp","pp","zero","ngpu","sgpu"].includes(id)?+v:v;}
+{let tg=qs.get("tg")||"";if(/^[01]{8}$/.test(tg))tg=tg.slice(0,3)+tg.slice(4);if(/^[01]{7}$/.test(tg))TK.forEach((k,i)=>S[k]=tg[i]==="1");}/* old links carried paged at index 3 */if(qs.get("pr")in{measured:1,memory:1,speed:1,custom:1})S.preset=qs.get("pr");
+S.fbatch=num("fbatch");S.ibatch=num("ibatch");
+{const c=GPUS.custom;c.vram=+$("cg_vram").value||24;c.bw=+$("cg_bw").value||1;c.tf=+$("cg_tf").value||100;c.rate=$("cg_rate").value===""?null:+$("cg_rate").value;}
+if(!inFilt(S.gpu,S.gf))S.gf="all";
+document.querySelectorAll("#gfilt button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===S.gf));
+$("gmore").onclick=()=>{S.showOff=!S.showOff;gpuCards();};
+$("share").onclick=()=>{if(urlTimer){clearTimeout(urlTimer);writeURLNow();}const u=location.href,say=t=>{$("share").textContent=t;setTimeout(()=>$("share").textContent="Copy link",1800);};
+  const legacy=()=>{const t=document.createElement("textarea");t.value=u;t.setAttribute("readonly","");t.style.position="fixed";t.style.opacity="0";document.body.appendChild(t);t.select();let ok=false;try{ok=document.execCommand("copy");}catch(e){}t.remove();say(ok?"Copied":"Copy from address bar");};
+  if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(u).then(()=>say("Copied"),legacy);else legacy();};
+$("method").value=S.method;
+/* ---- find best setup ---- */
+const QL={bf16:"BF16",fp8:"FP8",int8:"INT8",int4:"INT4"};
+function candidates(){const isFt=S.mode==="ft",m=model(S.model),out=[];let evaluated=0;
+  for(const [gk,g] of Object.entries(GPUS)){if(g.rate==null||gk==="custom")continue;
+    if(isFt){if(g.ftq==="no")continue;for(const n of [1,2,4,8]){if(n>g.maxN)continue;evaluated++;let bestR=null,bz=0;
+        // try every ZeRO stage and keep the best one for this GPU count (DDP avoids re-gathering weights when they fit)
+        for(const z of (n>1?[0,1,2,3]:[S.zero])){const r=ft(gk,m,S.model,{...ftOpt(),ngpu:n,zero:z});if(!(r.fits&&r.quoted&&r.cost!=null))continue;
+          const k=S.fgoal==="cost"?r.cost:r.hours;if(!bestR||k<(S.fgoal==="cost"?bestR.cost:bestR.hours)-1e-12){bestR=r;bz=z;}}
+        const r=bestR;if(r)out.push({gk,n,zero:bz,cost:r.cost,time:r.hours,tok:r.jobTok,hr:g.rate*n*1.10,mem:r.perGpuGB/vramOf(g),tag:r.tag});}}
+    else{for(const wq of ["bf16","fp8","int8","int4"]){if(wq==="fp8"&&!g.fp8)continue;for(const tp of [1,2,4,8]){if(tp>g.maxN)continue;evaluated++;
+        const r=inf(gk,m,{...infOpt(),maxGpus:GPUS[gk].maxN||8,wq,tp,pp:1,gpn:8,link:"auto"});if(!r.fits||r.queued||r.perM==null)continue;
+        out.push({gk,n:tp,wq,cost:r.perM,speed:r.perUser,agg:r.agg,hr:g.rate*tp*1.10,mem:(r.mem.total)/(vramOf(g)*tp),ttft:r.ttft});}}}}
+  const byCost=(a,b)=>a.cost-b.cost,bySpeed=isFt?(a,b)=>a.time-b.time:(a,b)=>b.speed-a.speed;
+  out.sort(S.fgoal==="cost"?byCost:bySpeed);return{out,evaluated,isFt,m};}
+function finder(){const{out,evaluated,isFt,m}=candidates();$("fh").textContent=`Best setups to ${isFt?"fine-tune":"serve"} ${m.l}`;
+  $("fgoal").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===S.fgoal));
+  $("fcount").textContent=`Evaluated ${evaluated} configurations, ${out.length} can run this job${isFt?"":" for all "+num("conc")+" users"}`;
+  finder._out=out;
+  if(!out.length){$("freco").innerHTML='<p class="fnote">No GPU with a rate can run this. Try a smaller model, QLoRA or INT4.</p>';$("falt").innerHTML="";$("ffoot").textContent="";return;}
+  const best=out[0],lbl=c=>`${c.n>1?c.n+"x ":""}${GPUS[c.gk].name}`,ring=c=>{const p=Math.min(100,c.mem*100);return`<div class="ring" style="background:conic-gradient(var(--acc) 0 ${p}%,var(--line2) ${p}% 100%)"><div>${Math.round(p)}%<small>memory</small></div></div>`;};
+  const main=c=>isFt?[[money(c.cost),"job cost"],[dur(c.time),"time"],[fmtK(c.tok)+" tok/s","throughput"],[money(c.hr)+"/hr","all GPUs, incl. overhead"]]
+                    :[[money(c.cost)+"/1M","output tokens"],[tpsF(c.speed)+" tok/s","per user"],[fmtK(c.agg)+" tok/s","total"],[money(c.hr)+"/hr","all GPUs, incl. overhead"]];
+  $("freco").innerHTML=`<div class="reco">${ring(best)}<div><div class="k">${S.fgoal==="cost"?"Lowest cost":"Fastest"}</div><h4>${lbl(best)}</h4><div class="sub">${isFt?`${best.n>1?"ZeRO-"+best.zero+" · ":""}${S.method.toUpperCase()}${best.tag?" · "+TAG[best.tag]:""}`:`${QL[best.wq]} · TP=${best.n}`} · ${GPUS[best.gk].rsrc}</div>
+    <div class="nums">${main(best).map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join("")}</div></div><button type="button" class="applyb" data-a="0">Apply</button></div>`;
+  const rows=out.slice(1,13),vs=c=>{if(isFt){const dc=(c.cost-best.cost)/best.cost*100,dt=(c.time-best.time)/best.time*100;return`${Math.abs(dc)<1?"same cost":Math.round(Math.abs(dc))+"% "+(dc>0?"more":"less")+" cost"}<small>${Math.abs(dt)<1?"same time":Math.round(Math.abs(dt))+"% "+(dt>0?"more":"less")+" time"}</small>`;}
+    const dc=(c.cost-best.cost)/best.cost*100,ds=(c.speed-best.speed)/best.speed*100;return`${Math.abs(dc)<1?"same cost":Math.round(Math.abs(dc))+"% "+(dc>0?"more":"less")+" per 1M"}<small>${Math.abs(ds)<1?"same speed":Math.round(Math.abs(ds))+"% "+(ds>0?"faster":"slower")+" per user"}</small>`;};
+  $("falt").innerHTML=`<thead><tr><th>Setup</th>${isFt?"":"<th>Precision</th>"}<th>Hourly<small>incl. 10% overhead</small></th><th>${isFt?"Cost and time":"Cost and speed"}</th><th>vs top pick</th><th></th></tr></thead><tbody>`+rows.map((c,i)=>`<tr><td>${lbl(c)}<small>${isFt?(c.n>1?"ZeRO-"+c.zero:"1 GPU"):"TP="+c.n} · ${Math.round(c.mem*100)}% memory</small></td>${isFt?"":`<td><span class="q">${QL[c.wq]}</span></td>`}<td>${money(c.hr)}/hr</td>
+    <td>${isFt?money(c.cost)+"<small>"+dur(c.time)+"</small>":money(c.cost)+"/1M<small>"+tpsF(c.speed)+" tok/s per user</small>"}</td><td>${vs(c)}</td><td><button type="button" class="applyb" data-a="${i+1}">Apply</button></td></tr>`).join("")+"</tbody>";
+  $("ffoot").textContent=isFt?"Only GPUs with a rate and a quotable fine-tune estimate are searched. Costs include our 10% overhead.":"INT4 and INT8 can reduce answer quality; check your model before switching. Setups where some users would queue are left out.";
+  finder._out=out;}
+$("findbtn").onclick=()=>{$("finder").hidden=false;finder();$("fclose").focus();};
+$("fclose").onclick=()=>{$("finder").hidden=true;$("findbtn").focus();};
+$("finder").addEventListener("click",e=>{if(e.target.id==="finder"){$("finder").hidden=true;}const b=e.target.closest(".applyb");if(!b)return;const c=finder._out[+b.dataset.a];
+  S.gpu=c.gk;if(S.mode==="ft"){S.ngpu=c.n;$("ngpu").value=c.n;if(c.n>1){S.zero=c.zero;$("zero").value=c.zero;}}else{S.wq=c.wq;$("wq").value=c.wq;S.rig="single";$("rig").value="single";S.sgpu=c.n;$("sgpu").value=c.n;S.tp=c.n;S.pp=1;S.gpn=8;$("tp").value=c.n;$("pp").value=1;$("gpn").value=8;}
+  if(!vis().includes(c.gk)){S.gf="all";document.querySelectorAll("#gfilt button").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v==="all"));}$("finder").hidden=true;render();});
+$("fgoal").addEventListener("click",e=>{const b=e.target.closest("button");if(b){S.fgoal=b.dataset.v;finder();}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("finder").hidden)$("finder").hidden=true;});
+buildControls();
+if(document.fonts)document.fonts.ready.then(render);
+render();
+</script></body></html>

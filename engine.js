@@ -83,7 +83,18 @@
     const full = s * s / 2, win = s > w ? s * w - w * w / 2 : full;
     return per * ((1 - sw) * full + sw * win);
   }
+  // GPU count to layout, as vLLM deploys it: tensor parallel inside one box, one pipeline stage per extra box.
+  // ngpu 0 = auto: the fewest GPUs that hold every requested user, else the fewest that fit at all.
   function inf(gk, m, o) {
+    if (o.ngpu === undefined) return inf1(gk, m, o);
+    const g = o.gpu || GPUS[gk], box = o.gpn || g.maxN || 8, lay = N => ({ ...o, tp: Math.min(N, box), pp: Math.max(1, N / box), gpn: box, link: "auto" });
+    if (o.ngpu > 0) return inf1(gk, m, lay(o.ngpu));
+    const opts = [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64].filter(N => N <= (o.maxGpus || 64) && (N <= box || N % box === 0));
+    let first = null;
+    for (const N of opts) { const r = inf1(gk, m, lay(N)); if (!r.fits) continue; if (r.cmax >= Math.max(1, o.C) * (o.batch || 1)) return r; first = first || r; }
+    return first || inf1(gk, m, lay(opts[opts.length - 1] || 1));
+  }
+  function inf1(gk, m, o) {
     const g = o.gpu || GPUS[gk], wq = o.wq || "bf16", wb = WQ[wq] || 2, kvq = KVQ[o.kvq] || 2;
     const tp = o.tp || o.gpus || 1, pp = o.pp || 1, N = tp * pp, gpn = o.gpn || tp;
     const ctx = o.pin + o.pout, users = Math.max(1, o.C), batch = users * (o.batch || 1);
@@ -437,7 +448,8 @@
       else if (meth === "qlora") adj.push("QLoRA speed taken as LoRA (not measured)");
       else if (meth === "dpo") { k /= DPO; adj.push("DPO x0.50 (assumed)"); }
     }
-    if (dr) adj.push((dr.exact ? "measured run " : "interpolated between measured runs ") + dr.run_id);
+    if (dr) { const ids = String(dr.run_id).split(/[,+]\s*/).filter(Boolean);   // ids stay in the tooltip, not the text
+      adj.push({ text: dr.exact ? "our measured run" : `interpolated between ${ids.length} measured run${ids.length > 1 ? "s" : ""}`, ids }); }
     if (m.moe && !dr) { const x = moeFactor();
       if (x) { k *= x.f; runs.push(...x.runs); adj.push(`MoE routing x${x.f.toFixed(2)} (measured on ${x.runs.length} MoE run${x.runs.length > 1 ? "s" : ""})`); }
       else adj.push("MoE speed from active params (not measured)"); }
@@ -465,6 +477,22 @@
     };
   }
 
-  const api = { GPUS, MODELS, ANCH, CAP, WQ, KVQ, OSTATE, attnType, vramOf, ft, inf, ftMem, kvBytes, level, etaN, MEAS };
+  // what the engine derived from the measured runs, for reporting (the workbook's "Fitted laws" sheet)
+  function diagnostics() {
+    const gpus = [...new Set((MEAS.train || []).map(r => r.gpu))].filter(g => GPUS[g]);
+    const out = { step: {}, multi: {}, method: {}, setting: {}, moe: moeFactor(), level: {}, actNoCkpt: actScaleNoCkpt(), cap: CAP };
+    for (const g of gpus) {
+      const st = stepLaw(g); if (st) out.step[g] = { below2048_e8: st.lo.e8, below2048_k: st.lo.k, above2048_e8: st.hi && st.hi.e8, above2048_k: st.hi && st.hi.k, own: !!st.own, runs: st.lo.runs.length };
+      for (const d of ["ddp", "fsdp"]) { const L = multiLaw(g, d); if (L) out.multi[g + "|" + d] = { e_8B_2: L.e(8, 2), e_8B_8: L.e(8, 8), e_32B_8: L.e(32, 8), own: L.own, maxN: L.maxN, runs: L.runs.length }; }
+      for (const m of ["qlora", "dpo", "full"]) { const f = methodFactor(g, m); if (f) out.method[g + "|" + m] = { f: f.f, own: f.own, runs: f.runs.length }; }
+      const S = { "no checkpointing": r => r.ckpt === 0 && r.attn === "sdpa" && r.optim === "adamw" && r.rank === 16,
+                  "eager attention": r => r.attn === "eager" && r.ckpt === 1 && r.optim === "adamw" && r.rank === 16 };
+      for (const o of ["adamw8bit", "adafactor", "sgd", "lion"]) S[o] = r => r.optim === o && r.ckpt === 1 && r.attn === "sdpa" && r.rank === 16;
+      for (const [k, f] of Object.entries(S)) { const x = settingFactor(g, f); if (x) out.setting[g + "|" + k] = { f: x.f, own: x.own, runs: x.runs.length }; }
+      out.level[g] = { level: level(g), source: g in LVL ? "SDS fit" : levelMeasured(g) != null ? "our runs" : "datasheet" };
+    }
+    return out;
+  }
+  const api = { GPUS, MODELS, ANCH, CAP, WQ, KVQ, OSTATE, attnType, vramOf, ft, inf, ftMem, kvBytes, level, etaN, MEAS, diagnostics };
   if (isNode) module.exports = api; else Object.assign(root, api);
 })(typeof window !== "undefined" ? window : globalThis);

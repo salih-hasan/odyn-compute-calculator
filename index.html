@@ -113,6 +113,9 @@ details.how summary::after{content:"+";color:var(--mut)}details.how[open] summar
 .r .l{color:var(--mut);font-size:13.5px}.r .l small{display:block;color:var(--dim);font-size:11.5px}
 .r .v{font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .r .v small{display:block;color:var(--dim);font-weight:400;font-size:11.5px}
+.r.adj{flex-direction:column;align-items:stretch;gap:6px}.r.adj ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px}
+.r.adj li{font-size:12.5px;font-weight:500;padding:3px 9px;border:1px solid var(--line);border-radius:999px;overflow-wrap:anywhere;max-width:100%}
+.r.adj li[title]{cursor:help;border-style:dashed}
 .good{color:var(--acc)}.warn{color:var(--warn)}
 .r input{width:64px;padding:3px 6px;font-size:12.5px;border-radius:6px;display:inline-block}
 .mem{padding:20px 22px}
@@ -408,22 +411,11 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
     </div>
     <div class="sec">
       <div class="shead"><span class="step">5</span><h2>Hardware configuration</h2><span class="shint body" id="topohint"></span></div>
-      <div class="segc wide" data-for="rig" data-opts="single:Single rig|cluster:Cluster"></div>
       <div class="slg hwgrid">
-      <div id="rig-single"><div class="sl" data-for="sgpu" data-ticks="1,2,4,8" data-label="GPUs" data-unit="tensor parallel"></div></div>
-      <div id="rig-cluster" hidden style="display:contents">
-        <div class="sl" data-for="tp" data-ticks="1,2,4,8,16,32" data-label="Tensor parallel" data-unit="GPUs per layer"></div>
-        <div class="sl" data-for="pp" data-ticks="1,2,4,8" data-label="Pipeline parallel" data-unit="stages"></div>
-        <div class="sl" data-for="gpn" data-ticks="1,2,4,8" data-label="GPUs per node" data-unit=""></div>
-      </div>
-      <div class="f" ><label for="link">GPU interconnect</label><select id="link"><option value="auto">Auto, from the GPU</option><option value="nvlink">NVLink</option><option value="pcie">PCIe</option><option value="node">InfiniBand, across nodes</option></select><div class="fnote">Faster links cut the cost of splitting a model across GPUs.</div></div>
+      <div class="sl" data-for="igpu" data-ticks="Auto,1,2,4,8,16,32,64" data-label="GPUs" data-unit="" data-note="Split across GPUs in one box (tensor parallel, measured up to 8). Past one box, each extra box is a pipeline stage (not measured)."></div>
       </div>
       <div class="store" hidden>
-        <select id="rig"><option value="single" selected>single</option><option value="cluster">cluster</option></select>
-        <select id="sgpu"><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
-        <select id="gpn"><option>1</option><option>2</option><option>4</option><option selected>8</option></select>
-        <select id="tp"><option selected>1</option><option>2</option><option>4</option><option>8</option><option>16</option><option>32</option></select>
-        <select id="pp"><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
+        <select id="igpu"><option value="0" selected>Auto</option><option>1</option><option>2</option><option>4</option><option>8</option><option>16</option><option>32</option><option>64</option></select>
       </div>
     </div>
     </div>
@@ -488,9 +480,9 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
 <script>
 const $=id=>document.getElementById(id);
 const MEASURED=window.MEASURED||{train:[],infer:[],pods:[]};
-const S={zero:3,ngpu:0,link:"auto",rig:"single",sgpu:1,memv:"gpu",basePreset:"measured",fgoal:"cost",mode:"ft",model:"qwen3-14b",gpu:"h100",gf:"dc",method:"lora",optim:"adamw",rank:16,fbatch:1,maxseq:2048,accum:8,preset:"measured",
+const S={zero:3,ngpu:0,igpu:0,memv:"gpu",basePreset:"measured",fgoal:"cost",mode:"ft",model:"qwen3-14b",gpu:"h100",gf:"dc",method:"lora",optim:"adamw",rank:16,fbatch:1,maxseq:2048,accum:8,preset:"measured",
  flash:true,ckpt:true,opt8:false,fused:false,packing:false,dynpad:true,pure16:false,
- wq:"bf16",kvq:"fp16",ibatch:1,offload:"",gpn:8,tp:1,pp:1,cov:90,st:"perf",xt:null,mv:"cost",api:{ft:3,in:0.15,out:0.60},gco2:475};
+ wq:"bf16",kvq:"fp16",ibatch:1,offload:"",cov:90,st:"perf",xt:null,mv:"cost",api:{ft:3,in:0.15,out:0.60},gco2:475};
 GPUS.custom={name:"Custom GPU",sn:"Custom",v:"Custom",tier:"custom",tf:100,bw:1,vram:24,tdp:300,rate:null,rsrc:"your specs",fleet:false,ftq:"x",mkt:{},maxN:8};
 const TOG=[["flash","Flash Attention","Skips storing attention scores: less memory and faster (measured)."],
  ["ckpt","Gradient checkpointing","Recomputes activations: far less memory, slower (measured)."],
@@ -528,14 +520,13 @@ function model(mk){
 }
 const ftOpt=()=>({rows:num("rows"),seq:num("seq"),epochs:num("epochs"),method:S.method,cov:S.cov,optim:S.optim,rank:S.rank,batch:S.fbatch,maxseq:S.maxseq,accum:S.accum,
  flash:S.flash,ckpt:S.ckpt,opt8:S.opt8,fused:S.fused,packing:S.packing,dynpad:S.dynpad,pure16:S.pure16,zero:S.zero,ngpu:S.ngpu||0});
-const gpusHave=gk=>{const mx=GPUS[gk].maxN||8;return S.rig==="cluster"?(S.gpn>mx?mx:1e9):mx;};   // a cluster adds nodes as needed; a box still holds at most maxN
-const infOpt=(C,gk)=>({maxGpus:gpusHave(gk||S.gpu),pin:num("pin"),pout:num("pout"),C:C||num("conc"),wq:S.wq,kvq:S.kvq,batch:S.ibatch,tp:S.tp,pp:S.pp,gpn:S.gpn,offload:S.offload,link:S.link});
+const infOpt=(C,gk)=>({maxGpus:64,ngpu:S.igpu,pin:num("pin"),pout:num("pout"),C:C||num("conc"),wq:S.wq,kvq:S.kvq,batch:S.ibatch,offload:S.offload});
 const FT=(gk,mk)=>ft(gk,model(mk),mk,ftOpt());
 const INF=(gk,mk,C)=>inf(gk,model(mk),infOpt(C,gk));
 
 const row=(l,v,ls,vs,cls)=>`<div class="r"><span class="l">${l}${ls?`<small>${ls}</small>`:""}</span><span class="v ${cls||""}">${v}${vs?`<small>${vs}</small>`:""}</span></div>`;
 function pct(p){return p==null?"n/a":Math.abs(p)<1?"on par":`<span class="${p>=0?"good":"warn"}">${Math.round(Math.abs(p))}% ${p>=0?"cheaper":"dearer"}</span>`;}
-function fitTip(){const t=[];if(S.wq!=="int4")t.push("INT4");if(S.rig==="single"?S.sgpu<Math.min(8,GPUS[S.gpu].maxN||8):true)t.push("more GPUs");if(!S.offload)t.push("offloading");return t.length?". Try "+t.join(", ").replace(/, ([^,]*)$/," or $1"):". Try a bigger GPU";}
+function fitTip(){const t=[];if(S.wq!=="int4")t.push("INT4");if(S.igpu&&S.igpu<64)t.push("more GPUs");if(!S.offload)t.push("offloading");return t.length?". Try "+t.join(", ").replace(/, ([^,]*)$/," or $1"):". Try a bigger GPU";}
 function statusEl(t,c){$("status").className="status "+c;$("status").textContent=t;}
 const mini=a=>a.map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join("");
 function memory(parts,cap,title){
@@ -631,10 +622,8 @@ function render(){
   $("mmeta").textContent=parts.join(" · ");fillInput();
   $("gmeta").innerHTML=`<div class="gsn"><span>Selected GPU</span><b>${g.name}</b>${gpuTag(g)}</div><div class="gss"><span><b>${g.vram} GB</b>memory</span><span><b>${g.bw} TB/s</b>bandwidth</span><span><b>${g.tf.toLocaleString()} TFLOPS</b>${g.unified?"FP16 GPU":"BF16 dense"}</span><span><b>${g.rate!=null?"$"+g.rate.toFixed(2)+"/hr":g.unified?"not for rent":"no rate"}</b>${g.rate!=null?g.rsrc:"per GPU"}</span></div>`;
   $("customgpu").hidden=S.gpu!=="custom";$("rankf").hidden=S.method==="full";
-  $("rig-single").hidden=S.rig!=="single";$("rig-cluster").hidden=S.rig!=="cluster";
   $("zeronote").textContent={0:"Every GPU holds a full copy. Simplest, most memory.",1:"Splits optimizer state across GPUs.",2:"Also splits gradients.",3:"Also splits the weights (FSDP). Least memory per GPU, reproduces our measured runs."}[S.zero]+(FT(S.gpu,S.model).n===1?" No effect on 1 GPU.":"");
   syncControls();
-  const used=S.rig==="cluster"?S.tp*S.pp:S.sgpu,nodes=Math.ceil(used/S.gpn);$("topohint").textContent=S.rig==="cluster"?`${used} GPU${used>1?"s":""} on ${nodes} node${nodes>1?"s":""}${S.tp>S.gpn?" · TP spans nodes (slower)":""}`:`${used} GPU${used>1?"s":""} in one box`;
   $("preset").value=S.preset;toggles();
   gpuCards();chips();
   isFt?sideFt(g,m):sideInf(g,m);explore();writeURL();
@@ -654,7 +643,7 @@ function sideFt(g,m){
     row("Time to train",dur(r.hours),r.hours<0.5?'<span class="warn">training only; startup (image, model load) not modelled</span>':"training wall clock")+row("Throughput",`${int(r.jobTok)} tok/s`,r.tag==="M"&&r.adj.length?"our measured run, adjusted":TAG[r.tag],r.n>1?`${int(r.eff)} per GPU`:"")+
     row("GPUs",`${r.n}x ${short(S.gpu)}`,"set by memory")+row("Method",{lora:"LoRA",qlora:"QLoRA 4-bit",full:"Full",dpo:"DPO"}[S.method],`${S.optim}${S.method!=="full"?", rank "+S.rank:""}`)+
     row("Trainable params",r.mem.trainable<1?(r.mem.trainable*1000).toFixed(0)+"M":r.mem.trainable.toFixed(1)+"B","of "+fmtP(m.p))+
-    row("GPU utilisation",`${Math.round(r.mfu)}%`,"MFU on useful tokens")+row("Samples per second",r.sps.toFixed(2),`${r.stepsPerSec.toFixed(3)} optimizer steps/s`)+row("Global batch",`${r.gbatch} samples`,`${S.fbatch} x ${S.accum} accumulation x ${r.n} GPU${r.n>1?"s":""}`)+row("Optimizer steps",int(r.steps),"over the whole run")+(r.adj.length?row("Adjusted from measured",r.adj.join(", "),"setup differs from our runs"):"")
+    row("GPU utilisation",`${Math.round(r.mfu)}%`,"MFU on useful tokens")+row("Samples per second",r.sps.toFixed(2),`${r.stepsPerSec.toFixed(3)} optimizer steps/s`)+row("Global batch",`${r.gbatch} samples`,`${S.fbatch} x ${S.accum} accumulation x ${r.n} GPU${r.n>1?"s":""}`)+row("Optimizer steps",int(r.steps),"over the whole run")+(r.adj.length?`<div class="r adj"><span class="l">Adjusted from measured<small>setup differs from our runs</small></span><ul>${r.adj.map(x=>typeof x==="string"?`<li>${x}</li>`:`<li title="${x.ids.join("\n")}">${x.text}</li>`).join("")}</ul></div>`:"")
     :row("Status",!r.fits?"does not fit":r.why);
   else{$("srows").innerHTML=
     row("Job cost",hasCost?money(r.cost):"n/a","our cost incl. 10% overhead")+
@@ -672,9 +661,10 @@ function sideFt(g,m){
 function sideInf(g,m){
   const r=INF(S.gpu,S.model),Cin=num("conc"),hasCost=r.fits&&r.perM!=null;
   if(r.over)statusEl("NOT ENOUGH GPUS","st-bad");else if(!r.fits)statusEl("DOES NOT FIT","st-bad");else if(r.offGB>0)statusEl(`FITS WITH OFFLOAD · ${gb(r.offGB)} GB OFF-GPU`,"st-warn");else if(r.queued)statusEl(r.cmax===1?"ONLY 1 USER FITS":`ONLY ${r.cmax} USERS FIT`,"st-warn");else statusEl(`FITS · UP TO ${int(r.cmax)} USERS`,"st-ok");
-  archChips(m,[["Weights",$("wq").selectedOptions[0].text.split(" ")[0]],["KV cache",$("kvq").selectedOptions[0].text.split(" ")[0]],["GPUs",`${r.tp} TP x ${r.pp} PP`]]);
+  archChips(m,[["Weights",$("wq").selectedOptions[0].text.split(" ")[0]],["KV cache",$("kvq").selectedOptions[0].text.split(" ")[0]],["GPUs",r.pp>1?`${r.N}: ${r.tp} TP x ${r.pp} boxes`:`${r.N} TP`]]);
+  $("topohint").textContent=r.N?(r.pp>1?`${r.N} GPUs: ${r.tp} per box x ${r.pp} boxes, pipeline across boxes (not measured)`:`${r.N} GPU${r.N>1?"s":""} in one box`)+(S.igpu?"":" · auto"):"";
   $("big").textContent=r.fits?`${tpsF(r.agg)} tok/s`:"n/a";
-  $("under").textContent=r.fits?`total output for ${r.B} in flight · ${tpsF(r.perUser)} tok/s each`:r.over?r.why+`. A ${short(S.gpu)} box holds up to ${GPUS[S.gpu].maxN||8}${S.rig==="cluster"?"; lower GPUs per node":""}.`:"weights plus one sequence do not fit"+fitTip()+".";
+  $("under").textContent=r.fits?`total output for ${r.B} in flight · ${tpsF(r.perUser)} tok/s each`:r.over?r.why+`. A ${short(S.gpu)} box holds up to ${GPUS[S.gpu].maxN||8}.`:"weights plus one sequence do not fit"+fitTip()+".";
   $("chip").hidden=!hasCost;if(hasCost)$("chip").innerHTML=`<b>${money(r.perM)}</b> per 1M output tokens`;
   const bound=r.fits?(r.tcomp>=r.tmem?"compute-bound":"memory-bound"):"";
   $("mini").innerHTML=mini([[r.fits?ms(r.ttft):"n/a","first token"],[r.fits?tpotF(r.tpot):"n/a","per token"],[r.fits?int(r.cmax):"n/a","max users"]]);
@@ -815,10 +805,8 @@ $("conc").addEventListener("input",render);
 ["method","optim","rank","wq","kvq"].forEach(id=>$(id)&&$(id).addEventListener("change",e=>{S[id]=id==="rank"?+e.target.value:e.target.value;render();}));
 $("fbatch").addEventListener("input",e=>{S.fbatch=Math.max(1,+e.target.value||1);});
 $("ibatch").addEventListener("input",e=>{S.ibatch=Math.max(1,+e.target.value||1);});
-["maxseq","accum","gpn","tp","pp","zero","ngpu"].forEach(id=>$(id).addEventListener("change",e=>{S[id]=+e.target.value;render();}));
-$("link").addEventListener("change",e=>{S.link=e.target.value;render();});$("memv").addEventListener("change",e=>{S.memv=e.target.value;render();});
-$("rig").addEventListener("change",e=>{S.rig=e.target.value;if(S.rig==="single"){S.gpn=8;S.pp=1;S.tp=S.sgpu;$("gpn").value=8;$("pp").value=1;$("tp").value=S.sgpu;}render();});
-$("sgpu").addEventListener("change",e=>{S.sgpu=+e.target.value;S.tp=S.sgpu;S.pp=1;S.gpn=8;$("tp").value=S.sgpu;$("pp").value=1;$("gpn").value=8;render();});
+["maxseq","accum","igpu","zero","ngpu"].forEach(id=>$(id).addEventListener("change",e=>{S[id]=+e.target.value;render();}));
+$("memv").addEventListener("change",e=>{S.memv=e.target.value;render();});
 $("toggles").addEventListener("click",e=>{const b=e.target.closest(".rst");if(!b)return;e.preventDefault();const base=PRESETS[S.basePreset]||PRESETS.measured;S[b.dataset.r]=!!base[b.dataset.r];
   S.preset=TOG.every(([k])=>!!S[k]===!!base[k])?S.basePreset:"custom";render();});
 $("offload").addEventListener("change",e=>{S.offload=e.target.value;render();});
@@ -828,7 +816,7 @@ $("toggles").addEventListener("change",e=>{const k=e.target.dataset.k;if(!k)retu
 let rt;addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(explore,120);});
 const TK=["flash","ckpt","opt8","fused","packing","dynpad","pure16"];
 const UI_IN={s:"rows",t:"seq",e:"epochs",pi:"pin",po:"pout",u:"conc",ib:"ibatch",fb:"fbatch",cgv:"cg_vram",cgb:"cg_bw",cgt:"cg_tf",cgr:"cg_rate",ct:"ctot",ca:"cact",ck:"ckv"};
-const UI_SEL={me:"method",op:"optim",r:"rank",ms:"maxseq",ac:"accum",wq:"wq",kq:"kvq",of:"offload",gn:"gpn",tp:"tp",pp:"pp",z:"zero",ng:"ngpu",ln:"link",rg:"rig",sg:"sgpu",mv:"memv"};
+const UI_SEL={me:"method",op:"optim",r:"rank",ms:"maxseq",ac:"accum",wq:"wq",kq:"kvq",of:"offload",ig:"igpu",z:"zero",ng:"ngpu",mv:"memv"};
 let urlTimer=null;function writeURL(){clearTimeout(urlTimer);urlTimer=setTimeout(writeURLNow,200);}
 function writeURLNow(){urlTimer=null;const q=new URLSearchParams();q.set("mode",S.mode);q.set("model",S.model);q.set("gpu",S.gpu);q.set("gf",S.gf);q.set("cov",S.cov);
   for(const[k,id]of Object.entries(UI_IN)){const v=$(id).value;if(v!=="")q.set(k,v);}for(const[k,id]of Object.entries(UI_SEL))q.set(k,$(id).value);
@@ -838,7 +826,8 @@ const qs=new URLSearchParams(location.search);
 if(qs.get("mode")==="inf")S.mode="inf";if(qs.get("model")in MODELS||qs.get("model")==="__c")S.model=qs.get("model");if(qs.get("gpu")in GPUS)S.gpu=qs.get("gpu");
 if(["dc","ws","mac","fleet","all"].includes(qs.get("gf")))S.gf=qs.get("gf");if(qs.get("cov")==="80")S.cov=80;if(qs.get("st")==="cost")S.st="cost";if(qs.get("xt"))S.xt=qs.get("xt");
 for(const[k,id]of Object.entries(UI_IN))if(qs.has(k)&&(qs.get(k)===""||isFinite(+qs.get(k))))$(id).value=clampV(id,qs.get(k));
-for(const[k,id]of Object.entries(UI_SEL))if(qs.has(k)&&[...$(id).options].some(o=>o.value===qs.get(k))){$(id).value=qs.get(k);const v=qs.get(k);S[id]=["rank","maxseq","accum","gpn","tp","pp","zero","ngpu","sgpu"].includes(id)?+v:v;}
+if(!qs.has("ig")&&(qs.has("sg")||qs.has("tp"))){const n=qs.get("rg")==="cluster"?(+qs.get("tp")||1)*(+qs.get("pp")||1):+qs.get("sg")||1;qs.set("ig",String(n));}   /* links made before the GPUs control merged TP, PP and cluster */
+for(const[k,id]of Object.entries(UI_SEL))if(qs.has(k)&&[...$(id).options].some(o=>o.value===qs.get(k))){$(id).value=qs.get(k);const v=qs.get(k);S[id]=["rank","maxseq","accum","igpu","zero","ngpu"].includes(id)?+v:v;}
 {let tg=qs.get("tg")||"";if(/^[01]{8}$/.test(tg))tg=tg.slice(0,3)+tg.slice(4);if(/^[01]{7}$/.test(tg))TK.forEach((k,i)=>S[k]=tg[i]==="1");}/* old links carried paged at index 3 */if(qs.get("pr")in{measured:1,memory:1,speed:1,custom:1})S.preset=qs.get("pr");
 S.fbatch=num("fbatch");S.ibatch=num("ibatch");
 {const c=GPUS.custom;c.vram=+$("cg_vram").value||24;c.bw=+$("cg_bw").value||1;c.tf=+$("cg_tf").value||100;c.rate=$("cg_rate").value===""?null:+$("cg_rate").value;}
@@ -882,7 +871,7 @@ function finder(){const{out,evaluated,isFt,m}=candidates();$("fh").textContent=`
 $("findbtn").onclick=()=>{$("finder").hidden=false;finder();$("fclose").focus();};
 $("fclose").onclick=()=>{$("finder").hidden=true;$("findbtn").focus();};
 $("finder").addEventListener("click",e=>{if(e.target.id==="finder"){$("finder").hidden=true;}const b=e.target.closest(".applyb");if(!b)return;const c=finder._out[+b.dataset.a];
-  S.gpu=c.gk;if(S.mode==="ft"){S.ngpu=c.n;$("ngpu").value=c.n;if(c.n>1){S.zero=c.zero;$("zero").value=c.zero;}}else{S.wq=c.wq;$("wq").value=c.wq;S.rig="single";$("rig").value="single";S.sgpu=c.n;$("sgpu").value=c.n;S.tp=c.n;S.pp=1;S.gpn=8;$("tp").value=c.n;$("pp").value=1;$("gpn").value=8;}
+  S.gpu=c.gk;if(S.mode==="ft"){S.ngpu=c.n;$("ngpu").value=c.n;if(c.n>1){S.zero=c.zero;$("zero").value=c.zero;}}else{S.wq=c.wq;$("wq").value=c.wq;S.igpu=c.n;$("igpu").value=c.n;}
   if(!vis().includes(c.gk)){S.gf="all";document.querySelectorAll("#gfilt button").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v==="all"));}$("finder").hidden=true;render();});
 $("fgoal").addEventListener("click",e=>{const b=e.target.closest("button");if(b){S.fgoal=b.dataset.v;finder();}});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("finder").hidden)$("finder").hidden=true;});

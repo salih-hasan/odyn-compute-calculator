@@ -5,7 +5,7 @@
   const isNode = typeof module !== "undefined" && module.exports;
   const MODELS = isNode ? require("./models.js").MODELS : root.MODELS;
   const GPUS = isNode ? require("./gpus.js").GPUS : root.GPUS;
-  const MEAS = (isNode ? (process.env.ODYN_NO_MEASURED ? null : (() => { try { return require("./measured.js"); } catch (e) { return null; } })()) : root.MEASURED) || { train: [], infer: [] };
+  const MEAS = (isNode ? (process.env.ODYN_NO_MEASURED ? null : (() => { try { return require(process.env.ODYN_MEAS_FILE || "./measured.js"); } catch (e) { return null; } })()) : root.MEASURED) || { train: [], infer: [] };
 
   /* calibrated fine-tune fit on our 15 single-GPU runs: tok/s/GPU = exp(level) * N^-P */
   const P = 0.734, W = 0.70, B0 = 5.2932, B1 = 0.8783;
@@ -18,7 +18,7 @@
   const scaleLaw = (n, b) => { if (n <= 1) return 1; const base = b <= 8 ? 0.79 : b >= 70 ? 0.93 : 0.79 + (b - 8) / 62 * 0.14;
     return Math.max(0.3, 1 - (1 - base) * Math.log(n) / Math.log(4)); };
   const etaN = (n, b) => n > 1 ? MULTI_B * scaleLaw(n, b) : 1;
-  const CAP = { 80: { f: 1.156, cov: "12/15" }, 90: { f: 1.236, cov: "14/15" } };
+  const CAP = { 80: { f: 1.143, cov: "108/131" }, 90: { f: 1.247, cov: "117/131" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
   const KV_UTIL = 0.90;
 
   // measured content-token throughput per GPU at seq 2048; [tok/s, gpus in run]
@@ -164,8 +164,8 @@
   function methodFactor(gk, method) {
     const pairs = [];
     for (const r of trainRows(r => r.method === method && isBase(r))) {
-      const lc = measuredCurve(r.gpu, r.model, "lora", 1, null);       // LoRA at the same tokens per step
-      if (lc) { const T = r.batch * r.seq, l = curveAt(lc, T);
+      const lc = measuredCurve(r.gpu, r.model, "lora", 1, null);       // LoRA at the same tokens processed per step
+      if (lc) { const T = r.batch * r.seq * (method === "dpo" ? 2 : 1), l = curveAt(lc, T);
         if (T >= lc[0].T * 0.99 && T <= lc[lc.length - 1].T * 1.01) pairs.push({ gpu: r.gpu, f: r.tok / l.tok, run: r.run_id }); }
     }
     const own = pairs.filter(p => p.gpu === gk), use = own.length ? own : pairs;
@@ -393,8 +393,10 @@
     let runs = [];
     // an exact measured run replaces the curve; convert to the curve's convention (content tok/s at 2048, 1.3x padding)
     const meth0 = o.method || "lora";
-    const Lp = Math.min(32768, Math.max(256, mem.seqEff)), Tstep = (o.batch || 1) * Lp;
-    const curve = (meth0 !== "lora" || !ANCH[gk + "|" + key] || ANCH[gk + "|" + key][1] !== n) ? measuredCurve(gk, key, meth0, n, o.zero == null ? 3 : o.zero) : null;
+    const Lp = Math.min(32768, Math.max(256, mem.seqEff)), Tstep = (o.batch || 1) * Lp * ((o.method || "lora") === "dpo" ? 2 : 1);
+    // our RunPod runs are primary: known processed tokens, same basis as every other GPU and as the price cap.
+    // (SDS fleet runs came out 2-16% faster than ours for identical setups, via an assumed 1.3x padding factor.)
+    const curve = measuredCurve(gk, key, meth0, n, o.zero == null ? 3 : o.zero);
     let dr = null;
     if (curve) {   // measured processed tok/s at this step size; expressed in the curve's convention so the later factors line up
       const c = curveAt(curve, Tstep); dr = { run_id: c.runs.join(", "), exact: c.exact };

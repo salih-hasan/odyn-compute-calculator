@@ -658,7 +658,7 @@ function sideFt(g,m){
     :row("Status",!r.fits?"does not fit":r.why);
   else{$("srows").innerHTML=
     row("Job cost",hasCost?money(r.cost):"n/a","our cost incl. 10% overhead")+
-    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`held for ${CAP[S.cov].cov} past runs`:"")+
+    row("Price cap",hasCost?money(r.cap):"n/a",`<span class="seg sm" id="cov">${[80,90].map(c=>`<button type="button" data-v="${c}" aria-pressed="${c===S.cov}">${c}%</button>`).join("")}</span>`,hasCost?`held for ${CAP[S.cov].cov} held-out runs`:"")+
     row("Cost per 1M tokens",hasCost?money(r.perM):"n/a","training tokens")+
     row("vs fine-tune API",hasCost?pct(less(r.perM,S.api.ft)):"n/a",`our ${hasCost?money(r.perM):"n/a"} vs API $<input id="apift" type="number" min="0" step="0.5" value="${S.api.ft}"> /1M`,"default gpt-4o-mini")+
     marketRow(g)+row("Energy",ok?`${(r.kwh<10?r.kwh.toFixed(2):int(r.kwh))} kWh`:"n/a",r.powerMeasured?"at our measured power draw":"at full GPU power")+

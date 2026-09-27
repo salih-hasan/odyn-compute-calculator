@@ -18,7 +18,7 @@
   const scaleLaw = (n, b) => { if (n <= 1) return 1; const base = b <= 8 ? 0.79 : b >= 70 ? 0.93 : 0.79 + (b - 8) / 62 * 0.14;
     return Math.max(0.3, 1 - (1 - base) * Math.log(n) / Math.log(4)); };
   const etaN = (n, b) => n > 1 ? MULTI_B * scaleLaw(n, b) : 1;
-  const CAP = { 80: { f: 1.226, cov: "235/288" }, 90: { f: 1.396, cov: "258/288" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
+  const CAP = { 80: { f: 1.228, cov: "286/355" }, 90: { f: 1.439, cov: "319/355" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
   const KV_UTIL = 0.90;
 
   // measured content-token throughput per GPU at seq 2048; [tok/s, gpus in run]
@@ -422,9 +422,17 @@
   }
   const specScore = g => W * Math.log(g.tf) + (1 - W) * Math.log(g.bw);
   // the measured GPU closest in datasheet speed (same vendor first), for GPUs with no runs of their own
+  // Datasheet TFLOPS are not comparable across product lines (pro cards quote full-rate tensor math, GeForce half-rate FP32
+  // accumulate, data-centre parts dense), so a sibling on the same chip is worth far more than a close datasheet number.
+  const CHIP = { h100: "GH100", h100nvl: "GH100", h100pcie: "GH100", h200: "GH100", gh200: "GH100", b200: "GB100", b300: "GB100", gb200: "GB100",
+    a100: "GA100", a100pcie: "GA100", "a100-40": "GA100", a40: "GA102", a10: "GA102", rtxa6000: "GA102", rtxa5000: "GA102", rtx3090: "GA102", rtx3060: "GA106",
+    l40s: "AD102", l40: "AD102", rtx6000ada: "AD102", rtx4090: "AD102", rtx5000ada: "AD102", rtx4080: "AD103", rtx4070ti: "AD104", l4: "AD104",
+    rtx5090: "GB202", rtxpro6000: "GB202", rtx5080: "GB203", v100: "GV100", "v100-32": "GV100", t4: "TU104",
+    mi300x: "CDNA3", mi325x: "CDNA3", mi250x: "CDNA2", mi210: "CDNA2", w7900: "RDNA3", rx7900xtx: "RDNA3" };
   function nearest(gk, has, anyVendor) {
     const g = GPUS[gk]; let best = null;
-    for (const k of Object.keys(GPUS)) { if (k === gk || !has(k)) continue; const d = Math.abs(specScore(GPUS[k]) - specScore(g)) + (GPUS[k].v === g.v ? 0 : 10) + (GPUS[k].tier === g.tier ? 0 : 1);
+    for (const k of Object.keys(GPUS)) { if (k === gk || !has(k)) continue;
+      const d = Math.abs(specScore(GPUS[k]) - specScore(g)) + (GPUS[k].v === g.v ? 0 : 10) + (GPUS[k].tier === g.tier ? 0 : 1) + (CHIP[k] && CHIP[k] === CHIP[gk] ? 0 : 2);
       if (!best || d < best.d) best = { k, d }; }
     return best && (anyVendor || best.d < 10) ? best.k : null;
   }

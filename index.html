@@ -364,7 +364,7 @@ select,input[type=number],input[type=text]:not(.pillin){height:var(--ctlh)}
       <div class="shead"><span class="step">4</span><h2>Training setup</h2>
         <label class="shint" style="font-family:var(--body)">Preset <select id="preset" style="width:auto;margin-left:6px;padding:5px 8px;font-size:12.5px"><option value="measured">Our measured setup</option><option value="memory">Memory saver</option><option value="speed">Max speed</option><option value="custom">Custom</option></select></label></div>
       <div class="ctlgrid">
-        <div class="f"><label>Method</label><div class="segc" data-for="method" data-opts="lora:LoRA|qlora:QLoRA|full:Full fine-tune|dpo:DPO"></div></div>
+        <div class="f"><label>Method</label><div class="segc" data-for="method" data-opts="lora:LoRA|qlora:QLoRA|full:Full fine-tune|dpo:DPO"></div><div class="fnote" id="methnote"></div></div>
         <div class="f"><label>Optimizer</label><div class="segc" data-for="optim" data-opts="adamw:AdamW|lion:Lion|adafactor:Adafactor|sgd:SGD"></div></div>
         <div class="f" id="rankf"><label>LoRA rank</label><div class="segc" data-for="rank" data-opts="8:8|16:16|32:32|64:64|128:128"></div></div>
         <div class="f"><label>ZeRO / FSDP stage</label><div class="segc" data-for="zero" data-opts="auto:Auto|0:0 DDP|1:1 Optim|2:2 Grads|3:3 FSDP"></div><div class="fnote" id="zeronote"></div></div>
@@ -646,6 +646,13 @@ function renderMain(){
   $("mmeta").textContent=parts.join(" · ");fillInput();
   $("gmeta").innerHTML=`<div class="gsn"><span>Selected GPU</span><b>${g.name}</b>${gpuTag(g)}</div><div class="gss"><span><b>${g.vram} GB</b>memory</span><span><b>${g.bw} TB/s</b>bandwidth</span><span><b>${g.tf.toLocaleString()} TFLOPS</b>${g.unified?"FP16 GPU":"BF16 dense"}</span><span><b>${g.rate!=null?"$"+g.rate.toFixed(2)+"/hr":g.unified?"not for rent":"no rate"}</b>${g.rate!=null?g.rsrc:"per GPU"}</span></div>`;
   $("customgpu").hidden=S.gpu!=="custom";$("rankf").hidden=S.method==="full";
+  {const mk=S.model,mm=model(mk),cmp=["lora","qlora","full","dpo"].map(me=>[me,ft(S.gpu,mm,mk,{...ftOpt(),method:me,ngpu:0})]),
+     nm={lora:"LoRA",qlora:"QLoRA",full:"Full",dpo:"DPO"},cell=([me,x])=>`${nm[me]} ${x.fits&&x.quoted&&x.cost!=null?money(x.cost)+(x.n>1?" ("+x.n+" GPUs)":""):x.fits&&x.quoted?dur(x.hours):"n/a"}`;
+   const note={lora:"Trains small adapter matrices; the base model stays frozen in 16-bit.",
+     qlora:"Base weights in 4-bit: about a quarter of LoRA's weight memory, but about 0.45x its speed (measured on 18 GPUs), because weights are unpacked on every pass. It saves memory, not time: worth it when that lets the job run on a smaller or cheaper GPU.",
+     full:"Trains every weight: about 4x LoRA's memory. In our stack (Hugging Face PEFT) it runs faster per token than LoRA on models under about 4B, where LoRA's extra small kernels dominate; an optimised LoRA would win. Produces a full model checkpoint.",
+     dpo:"Preference training on chosen and rejected pairs: two sequences per sample, measured about 0.4x LoRA's speed."}[S.method];
+   $("methnote").textContent=note+" For this job: "+cmp.map(cell).join(" · ")+".";}
   $("zeronote").textContent=S.zero==="auto"?(()=>{const f=FT(S.gpu,S.model);return f.n>1?`Picks the cheapest stage that fits: ZeRO-${f.zero} for this job.`:"Picks the cheapest stage that fits. No effect on 1 GPU.";})():{0:"Every GPU holds a full copy. Simplest, most memory.",1:"Splits optimizer state across GPUs.",2:"Also splits gradients.",3:"Also splits the weights (FSDP). Least memory per GPU, reproduces our measured runs."}[S.zero]+(FT(S.gpu,S.model).n===1?" No effect on 1 GPU.":"");
   syncControls();
   $("preset").value=S.preset;toggles();

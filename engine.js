@@ -19,7 +19,7 @@
   const scaleLaw = (n, b) => { if (n <= 1) return 1; const base = b <= 8 ? 0.79 : b >= 70 ? 0.93 : 0.79 + (b - 8) / 62 * 0.14;
     return Math.max(0.3, 1 - (1 - base) * Math.log(n) / Math.log(4)); };
   const etaN = (n, b) => n > 1 ? MULTI_B * scaleLaw(n, b) : 1;
-  const CAP = { 80: { f: 1.228, cov: "286/355" }, 90: { f: 1.439, cov: "319/355" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
+  const CAP = { 80: { f: 1.217, cov: "288/355" }, 90: { f: 1.439, cov: "319/355" } };   // conformal, from held-out errors of this engine (odyn-console/live_holdout.js); coverage calibrated without the GPU tested
   const KV_UTIL = 0.90;
 
   // measured content-token throughput per GPU at seq 2048; [tok/s, gpus in run]
@@ -443,6 +443,13 @@
   const keyOf = m => { if (!KEYS) { KEYS = new Map(); for (const k in MODELS) KEYS.set(MODELS[k], k); } return KEYS.get(m); };
   // per-GPU correction from our vLLM runs: decode step ratio, first-token ratio at 1 user, and first-token growth with load
   const CAL = {};
+  const loadPts = {};
+  let POOLED;
+  function pooledLoadPts(q) {   // every GPU's own load points (computing each GPU's correction fills loadPts)
+    if (POOLED) return POOLED; POOLED = [];
+    for (const g of new Set(inferRows(r => r.tp === 1 && r.quant === "none").map(r => r.gpu))) { inferCal(g, "none"); POOLED.push(...(loadPts[g + "|none"] || [])); }
+    return POOLED;
+  }
   function inferCal(gk, q) {
     const ck = gk + "|" + (q || "none");
     if (ck in CAL) return CAL[ck];
@@ -454,9 +461,14 @@
     const dec = gm(rows.map(r => r.tpot_ms / pred(r).tpot));
     const ttft1 = one.length ? gm(one.map(r => r.ttft_ms / (pred(r).ttft * 1000))) : 1;
     // first-token time under load relative to 1 user, as measured; log-linear in users between measured points
-    const pts = [];
+    const pts = []; let loadPooled = false;
     for (const r of rows) { const b = one.find(x => x.model === r.model && x.inp === r.inp && x.out === r.out);
-      if (b && pred(r).cmax >= r.conc) { const y = Math.log(r.ttft_ms / b.ttft_ms); if (isFinite(y)) pts.push([Math.log(r.conc), y]); } }
+      // without queueing, first-token time grows at most linearly with users; a steeper point queued for KV memory
+      // (vLLM held fewer sequences than our estimate), so it says nothing about load
+      if (b && pred(r).cmax >= r.conc) { const y = Math.log(r.ttft_ms / b.ttft_ms); if (isFinite(y) && y <= Math.log(r.conc)) pts.push([Math.log(r.conc), y]); } }
+    loadPts[ck] = pts.slice();
+    // too few user counts on this GPU to shape the curve: use every GPU's points (the shape of queueing for prefill is shared)
+    if (new Set(pts.map(p => p[0])).size < 3) { pts.length = 0; pts.push(...pooledLoadPts(q)); loadPooled = true; }
     pts.sort((a, b) => a[0] - b[0]);
     // isotonic fit (pool adjacent violators): points come from several models and lengths, and first-token time must not
     // fall as users are added; interpolate between the pooled levels, the last slope beyond the last measured user count
@@ -469,11 +481,12 @@
     const load = C => { if (!knots.length) return 1; const x = Math.log(Math.max(1, C));
       if (x <= knots[0][0]) return Math.exp(knots[0][1] * (knots[0][0] > 0 ? x / knots[0][0] : 1));
       if (x >= knots[knots.length - 1][0]) { const n = knots.length, [xa, ya] = knots[Math.max(0, n - 2)], [xb, yb] = knots[n - 1];
-        const sl = n > 1 && xb > xa ? Math.max(0, (yb - ya) / (xb - xa)) : 0;   // beyond our most users: keep the last measured slope
+        // beyond our most users: keep the last measured slope, at most linear in users (queueing for a slot, Little's law)
+        const sl = n > 1 && xb > xa ? Math.min(1, Math.max(0, (yb - ya) / (xb - xa))) : 0;
         return Math.exp(yb + sl * (x - xb)); }
       let i = 1; while (knots[i][0] < x) i++; const [x0, y0] = knots[i - 1], [x1, y1] = knots[i];
       return Math.exp(y0 + (y1 - y0) * (x - x0) / (x1 - x0)); };
-    return (CAL[ck] = { dec: Math.min(1.5, Math.max(0.6, dec)), ttft1: Math.min(2, Math.max(0.5, ttft1)), load, knots, rawDec: dec, rawTtft1: ttft1, runs: rows.map(r => r.run_id), n: rows.length });
+    return (CAL[ck] = { dec: Math.min(1.5, Math.max(0.6, dec)), ttft1: Math.min(2, Math.max(0.5, ttft1)), load, knots, loadPooled, rawDec: dec, rawTtft1: ttft1, runs: rows.map(r => r.run_id), n: rows.length });
   }
 
   const OSTATE = { adamw: 8, lion: 4, sgd: 4, adafactor: 0.1 };      // optimizer state bytes/trained param (fp32)
@@ -573,7 +586,9 @@
     if (n > g.maxN) return { ...r, fits: false, why: "more than " + g.maxN + " GPUs" };
     // AMD fine-tuning: no runs of ours; our runs on the NVIDIA GPU MLPerf compares it with, x the measured MLPerf speed ratio
     if (g.v === "AMD" && AMD_FT_PAIRS[gk] && levelMeasured(gk) == null && !o._sib) {
-      const ref = AMD_FT_PAIRS[gk], rr = ft(ref, m, key, { ...o, ngpu: n, zero: z, _sib: 1 }), ratio = MLPERF_FT[ref] / MLPERF_FT[gk];
+      // per-GPU speed from our runs on the paired NVIDIA GPU at the count that GPU needs (it may hold less per GPU), x the MLPerf ratio
+      const ref = AMD_FT_PAIRS[gk], ratio = MLPERF_FT[ref] / MLPERF_FT[gk];
+      let rr = ft(ref, m, key, { ...o, ngpu: n, zero: z, _sib: 1 }); if (!(rr.fits && rr.quoted)) rr = ft(ref, m, key, { ...o, ngpu: 0, zero: z, _sib: 1 });
       if (rr.fits && rr.quoted) { const eff = rr.eff * ratio, hours = tt / (eff * n) / 3600, gpuH = hours * n, cost = g.rate == null ? null : gpuH * g.rate * OVERHEAD;
         const adj = [`from our ${GPUS[ref].name} runs x${ratio.toFixed(2)}: MLPerf Training Llama 2 70B LoRA on 8 GPUs, ${GPUS[gk].sn} ${MLPERF_FT[gk]} min vs ${GPUS[ref].sn} ${MLPERF_FT[ref]} min`, ...rr.adj.filter(a => typeof a === "string")];
         const gbatch = (o.batch || 1) * (o.accum || 1) * n, samples = o.rows * o.epochs, sps = eff * n / avg;
@@ -670,7 +685,8 @@
       // every measured multi-GPU run, so etaN already covers it; it bites for big MoE models (few active, many total params) and PCIe.
       const stepTok = (o.batch || 1) * (o.accum || 1) * Math.min(avg, o.maxseq || 2048), tc = stepTok / eff, fr = (n - 1) / n;
       const nvl = hasNV(g, n), bw = (nvl ? (g.nvbw || 240) : (g.pcie || 25)) * 1e9;
-      const gather = z >= 3 ? (o.accum || 1) * 2 * mem.weights * 1e9 * fr / bw : 0;
+      // ZeRO-3 gathers the weights for forward and backward; DPO also runs the reference model forward (a third gather)
+      const gather = z >= 3 ? (o.accum || 1) * ((o.method || "lora") === "dpo" ? 3 : 2) * mem.weights * 1e9 * fr / bw : 0;
       const ar = 2 * mem.grad * 1e9 * fr / bw;
       const t = Math.max(tc, gather) + ar, f = tc / t;
       if (f < 0.995) { eff *= f; adj.push((nvl ? "GPU-to-GPU traffic" : "PCIe traffic between GPUs") + " x" + f.toFixed(2) + " (estimate)"); }
